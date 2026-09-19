@@ -12,17 +12,17 @@ import {
 import { Activity, ShieldAlert, ListChecks, Clock } from 'lucide-react'
 import { Card, RiskBadge, riskHex } from './components/ui.jsx'
 import { useTheme } from './hooks/useTheme.js'
+import { useAuth } from './context/AuthContext.jsx'
+import PatientSelector from './components/PatientSelector.jsx'
 
 /**
  * Clinician trend dashboard, reachable via the Clinician tab in the
- * top nav (see App.jsx). Loads the latest check-in history on mount.
- *
- * Every load of this component calls GET /api/dashboard/:patient_id,
- * which logs an audit entry server-side (see database/audit_log.py).
- * GET /api/audit-log surfaces that trail live in the demo.
+ * top nav (see App.jsx). The clinician picks which patient to view
+ * (see /api/patients); loading a patient's history calls
+ * GET /api/dashboard/:patient_id, which logs an audit entry
+ * server-side (see database/audit_log.py). GET /api/audit-log
+ * surfaces that trail live in the demo.
  */
-
-const PATIENT_ID = 'demo-patient-001'
 
 function StatTile({ icon: Icon, label, value, accent }) {
   return (
@@ -59,23 +59,48 @@ function ChartTooltip({ active, payload }) {
   )
 }
 
+async function getJSON(url, token) {
+  const res = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`Request to ${url} failed (${res.status})`)
+  return res.json()
+}
+
 export default function ClinicianDashboard() {
   const { theme } = useTheme()
+  const { getAccessToken } = useAuth()
+
+  const [patients, setPatients] = useState([])
+  const [patientsLoading, setPatientsLoading] = useState(true)
+  const [selectedPatientId, setSelectedPatientId] = useState(null)
+
   const [history, setHistory] = useState([])
   const [auditEntries, setAuditEntries] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [historyLoading, setHistoryLoading] = useState(false)
 
+  // Patient list + audit log: fetched once on mount.
   useEffect(() => {
-    Promise.all([
-      fetch(`/api/dashboard/${PATIENT_ID}?clinician_id=demo-clinician`).then((r) => r.json()),
-      fetch('/api/audit-log').then((r) => r.json()),
-    ])
-      .then(([dashboardData, audit]) => {
-        setHistory(dashboardData.history || [])
-        setAuditEntries(audit)
+    const token = getAccessToken()
+    getJSON('/api/patients', token)
+      .then((list) => {
+        setPatients(list)
+        setSelectedPatientId(list[0]?.patient_id ?? null)
       })
-      .finally(() => setLoading(false))
+      .finally(() => setPatientsLoading(false))
+    getJSON('/api/audit-log', token).then(setAuditEntries)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Patient history: re-fetched whenever the selected patient changes.
+  useEffect(() => {
+    if (!selectedPatientId) return
+    setHistoryLoading(true)
+    getJSON(`/api/dashboard/${selectedPatientId}`, getAccessToken())
+      .then((data) => setHistory(data.history || []))
+      .finally(() => setHistoryLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPatientId])
 
   const chartData = history.map((h) => ({
     timestamp: h.timestamp,
@@ -85,6 +110,7 @@ export default function ClinicianDashboard() {
   }))
 
   const latest = history[history.length - 1]
+  const selectedPatient = patients.find((p) => p.patient_id === selectedPatientId)
 
   const chartInk = theme === 'dark' ? '#ffffff' : '#000000'
   const chartMuted = theme === 'dark' ? '#666666' : '#999999'
@@ -92,21 +118,31 @@ export default function ClinicianDashboard() {
   const chartAxisLine = theme === 'dark' ? '#333333' : '#dddddd'
   const chartDotStroke = theme === 'dark' ? '#000000' : '#ffffff'
 
+  const loading = patientsLoading || historyLoading
+
   return (
     <div>
       <div className="mb-10 flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold tracking-tight text-black dark:text-white">Clinician Dashboard</h1>
           <p className="mt-2 text-base text-black/50 dark:text-white/50">
-            Patient <span className="tabular text-black/70 dark:text-white/70">{PATIENT_ID}</span>
+            {selectedPatient ? (
+              <>
+                Patient <span className="text-black/70 dark:text-white/70">{selectedPatient.display_name}</span>
+              </>
+            ) : (
+              'Select a patient to view their trend.'
+            )}
           </p>
         </div>
         {latest && <RiskBadge level={latest.risk.risk_level} />}
       </div>
 
+      {!patientsLoading && <PatientSelector patients={patients} selectedPatientId={selectedPatientId} onChange={setSelectedPatientId} />}
+
       {loading ? (
         <Card className="p-10 text-center text-sm text-black/40 dark:text-white/40">Loading patient trend…</Card>
-      ) : history.length === 0 ? (
+      ) : !selectedPatientId ? null : history.length === 0 ? (
         <Card className="p-10 text-center text-sm text-black/40 dark:text-white/40">No check-ins yet.</Card>
       ) : (
         <>

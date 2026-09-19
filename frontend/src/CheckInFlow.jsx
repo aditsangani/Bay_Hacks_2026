@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { Card, Button, ProgressSteps, RiskBadge } from './components/ui.jsx'
 import WellnessQuestion from './components/WellnessQuestion.jsx'
+import { useAuth } from './context/AuthContext.jsx'
 
 /**
  * Daily 60-second check-in flow.
@@ -29,8 +30,9 @@ import WellnessQuestion from './components/WellnessQuestion.jsx'
  *  5. POST /api/checkin/submit -> combined risk score + wellness + FHIR-shaped
  *     payload
  *
- * SWAP BEFORE DEMO:
- *  - PATIENT_ID with real/mock patient selection UI if you have time
+ * The patient is whoever is currently authenticated (see AuthContext) --
+ * every request below carries their Supabase access token, and the
+ * backend derives patient_id from it rather than trusting the client.
  *
  * ElevenLabs widget docs: https://elevenlabs.io/docs/conversational-ai/guides/quickstart
  * (confirm the exact web component tag/attributes against their current docs —
@@ -38,7 +40,6 @@ import WellnessQuestion from './components/WellnessQuestion.jsx'
  */
 
 const ELEVENLABS_AGENT_ID = 'agent_1201m2wz6ap4e3yrmdy4cfbgn5pm'
-const PATIENT_ID = 'demo-patient-001' // swap for real patient selection if you build it
 
 const STEPS = {
   CONSENT: 'consent',
@@ -63,10 +64,13 @@ const fade = {
   transition: { duration: 0.25, ease: 'easeOut' },
 }
 
-async function postJSON(url, body) {
+async function postJSON(url, body, token) {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({}))
@@ -77,6 +81,7 @@ async function postJSON(url, body) {
 }
 
 export default function CheckInFlow() {
+  const { getAccessToken } = useAuth()
   const [step, setStep] = useState(STEPS.CONSENT)
   const [consented, setConsented] = useState(false)
   const [voiceStartTime, setVoiceStartTime] = useState(null)
@@ -159,7 +164,7 @@ export default function CheckInFlow() {
       if (!frame) return
       previewInFlightRef.current = true
       try {
-        const result = await postJSON('/api/checkin/face/preview', { image_b64: frame })
+        const result = await postJSON('/api/checkin/face/preview', { image_b64: frame }, getAccessToken())
         if (mountedRef.current) setPreview(result.quality)
       } catch {
         // transient preview hiccups aren't worth surfacing to the user
@@ -168,7 +173,7 @@ export default function CheckInFlow() {
       }
     }, 700)
     return () => clearInterval(id)
-  }, [step, captureFrameDataUrl])
+  }, [step, captureFrameDataUrl, getAccessToken])
 
   const handleConsent = async () => {
     setConsented(true)
@@ -187,7 +192,7 @@ export default function CheckInFlow() {
         frames.push(frame)
         if (i < 2) await new Promise((resolve) => setTimeout(resolve, 200))
       }
-      await postJSON('/api/checkin/face', { patient_id: PATIENT_ID, images_b64: frames })
+      await postJSON('/api/checkin/face', { images_b64: frames }, getAccessToken())
       stopCamera()
       setStep(STEPS.VOICE)
       setVoiceStartTime(Date.now())
@@ -207,13 +212,12 @@ export default function CheckInFlow() {
     setError(null)
     try {
       await postJSON('/api/checkin/voice', {
-        patient_id: PATIENT_ID,
         response_latency_ms: voiceStartTime ? Date.now() - voiceStartTime : null,
         // voice_jitter is a stub here — either wire in a Parselmouth
         // analysis step server-side on the recorded audio, or be
         // upfront in the demo that this is simulated for now.
         voice_jitter: 0.01 + Math.random() * 0.02,
-      })
+      }, getAccessToken())
       setStep(STEPS.WELLNESS)
     } catch (err) {
       setError('Voice check-in failed: ' + err.message)
@@ -228,7 +232,7 @@ export default function CheckInFlow() {
     setWellnessLoading(true)
     setError(null)
     try {
-      const plan = await postJSON('/api/checkin/wellness/plan', { answers: nextAnswers })
+      const plan = await postJSON('/api/checkin/wellness/plan', { answers: nextAnswers }, getAccessToken())
       setWellnessPlan(plan)
       setWellnessAnswers(plan.answers)
     } catch (err) {
@@ -252,9 +256,8 @@ export default function CheckInFlow() {
     setError(null)
     try {
       const data = await postJSON('/api/checkin/submit', {
-        patient_id: PATIENT_ID,
         wellness: wellnessAnswers,
-      })
+      }, getAccessToken())
       setFinalResult(data)
       setStep(STEPS.RESULT)
     } catch (err) {

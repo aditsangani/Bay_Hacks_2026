@@ -1,14 +1,16 @@
 """
 NeuroTriage-Home backend — hackathon starter.
 
-Endpoints:
-  POST /api/checkin/face/preview -> transient landmark tracking, nothing persisted
-  POST /api/checkin/face       -> analyze a short burst, store facial asymmetry metrics
-  POST /api/checkin/wellness/plan -> adaptive sleep, symptoms, and mood questions
-  POST /api/checkin/voice      -> receive ElevenLabs agent output (transcript + latency), return voice metrics
-  POST /api/checkin/submit     -> combine face + voice metrics for a check-in, score risk, log to dashboard
-  GET  /api/dashboard/:patient -> get trend history + latest risk for a patient (clinician view)
-  GET  /api/audit-log          -> mock clinician access log
+Endpoints (auth: see auth.py -- Authorization: Bearer <supabase access token>):
+  POST /api/checkin/face/preview -> [any logged-in user] transient landmark tracking, nothing persisted
+  POST /api/checkin/face       -> [patient] analyze a short burst, store facial asymmetry metrics
+  POST /api/checkin/wellness/plan -> [any logged-in user] adaptive sleep, symptoms, and mood questions
+  POST /api/checkin/voice      -> [patient] receive ElevenLabs agent output (transcript + latency), return voice metrics
+  POST /api/checkin/submit     -> [patient] combine face + voice metrics for a check-in, score risk, log to dashboard
+  GET  /api/dashboard/:patient -> [clinician] get trend history + latest risk for a patient
+  GET  /api/audit-log          -> [clinician] clinician access log
+  GET  /api/patients           -> [clinician] list patients, for the dashboard's patient picker
+  POST /api/profile            -> [public] create a profile row right after signup (pre-confirmation)
 
 Run:
   pip install -r requirements.txt
@@ -32,7 +34,7 @@ NOTE ON PRIVACY / HIPAA-principles boundary:
 
 import os
 import sys
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 
 # database/ is a sibling of backend/, not a package under it — add it
@@ -50,6 +52,8 @@ from anomaly_scoring import (
     build_fhir_shaped_observation,
 )
 from audit_log import audit_log
+from db import get_client
+from auth import require_auth, require_role
 import patient_history
 
 app = Flask(__name__)
@@ -63,6 +67,7 @@ PENDING_CHECKINS = {}
 
 
 @app.route("/api/checkin/face/preview", methods=["POST"])
+@require_auth
 def preview_face():
     """Transient tracking only: frames and landmarks never enter patient history."""
     data = request.get_json(silent=True)
@@ -76,6 +81,7 @@ def preview_face():
 
 
 @app.route("/api/checkin/wellness/plan", methods=["POST"])
+@require_auth
 def wellness_plan():
     """Choose follow-ups without persisting unfinished questionnaire answers."""
     data = request.get_json(silent=True)
@@ -88,6 +94,7 @@ def wellness_plan():
 
 
 @app.route("/api/checkin/face", methods=["POST"])
+@require_role("patient")
 def checkin_face():
     """
     Accept one legacy image_b64 or 3–5 images_b64 for a median capture.
@@ -96,11 +103,12 @@ def checkin_face():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "JSON object required"}), 400
-    patient_id = data.get("patient_id")
+    # patient_id is always the authenticated caller -- any patient_id the
+    # client sends in the body is ignored, not merged in, so there is
+    # exactly one source of truth for whose data this is.
+    patient_id = g.user_id
     image_b64 = data.get("image_b64")
 
-    if not isinstance(patient_id, str) or not patient_id.strip():
-        return jsonify({"error": "patient_id required"}), 400
     # A failed retake must not silently reuse an earlier accepted capture.
     PENDING_CHECKINS.get(patient_id, {}).pop("face", None)
     try:
@@ -120,6 +128,7 @@ def checkin_face():
 
 
 @app.route("/api/checkin/voice", methods=["POST"])
+@require_role("patient")
 def checkin_voice():
     """
     Body from your ElevenLabs Conversational AI agent (adapt field
@@ -127,7 +136,6 @@ def checkin_voice():
     check ElevenLabs' Conversational AI docs for the exact schema).
 
     Expected fields for this MVP:
-      patient_id: str
       response_latency_ms: float   # time between prompt end and patient response start
       voice_jitter: float          # if you run Parselmouth on the audio server-side;
                                     # otherwise stub this with a placeholder value for
@@ -135,10 +143,7 @@ def checkin_voice():
       transcript: str              # optional, for phoneme_slur / fluency scoring later
     """
     data = request.get_json(force=True)
-    patient_id = data.get("patient_id")
-
-    if not patient_id:
-        return jsonify({"error": "patient_id required"}), 400
+    patient_id = g.user_id
 
     voice_metrics = {
         "response_latency_ms": data.get("response_latency_ms"),
@@ -152,6 +157,7 @@ def checkin_voice():
 
 
 @app.route("/api/checkin/submit", methods=["POST"])
+@require_role("patient")
 def submit_checkin():
     """
     Call this after both /face and /voice have run for a patient in
@@ -162,9 +168,9 @@ def submit_checkin():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "JSON object required"}), 400
-    patient_id = data.get("patient_id")
+    patient_id = g.user_id
 
-    if not isinstance(patient_id, str) or patient_id not in PENDING_CHECKINS:
+    if patient_id not in PENDING_CHECKINS:
         return jsonify({"error": "no pending face/voice data for this patient_id"}), 400
 
     pending = PENDING_CHECKINS[patient_id]
@@ -218,22 +224,74 @@ def submit_checkin():
 
 
 @app.route("/api/dashboard/<patient_id>", methods=["GET"])
+@require_role("clinician")
 def dashboard(patient_id):
-    """
-    Clinician-facing trend view. In a real build this route would sit
-    behind auth; for the demo, call audit_log.log(...) here to show
-    the mock audit trail working.
-    """
-    clinician_id = request.args.get("clinician_id", "demo-clinician")
-    audit_log.log(clinician_id, "view_patient_record", target_patient_hash=patient_id)
+    """Clinician-facing trend view for a patient the clinician picks (see /api/patients)."""
+    audit_log.log(g.user_id, "view_patient_record", target_patient_hash=patient_id)
 
     history = patient_history.history_for(patient_id)
     return jsonify({"patient_id": patient_id, "history": history})
 
 
 @app.route("/api/audit-log", methods=["GET"])
+@require_role("clinician")
 def get_audit_log():
     return jsonify(audit_log.all_entries())
+
+
+@app.route("/api/patients", methods=["GET"])
+@require_role("clinician")
+def list_patients():
+    """Backs the clinician dashboard's patient picker."""
+    result = (
+        get_client()
+        .table("profiles")
+        .select("id, display_name")
+        .eq("role", "patient")
+        .order("display_name")
+        .execute()
+    )
+    return jsonify([{"patient_id": r["id"], "display_name": r["display_name"]} for r in result.data])
+
+
+@app.route("/api/profile", methods=["POST"])
+def create_profile():
+    """
+    Called by the frontend immediately after supabase.auth.signUp()
+    succeeds, BEFORE the account has an active session -- email
+    confirmation is required (standard flow), so there's no session yet
+    for a client-side RLS-gated insert to work against. Uses the
+    service_role client to bypass RLS, which is safe because this only
+    ever creates a brand-new profile row (the primary key blocks
+    overwriting an existing one) and verifies the user_id is a real,
+    just-created Supabase Auth user before inserting.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    user_id = data.get("user_id")
+    role = data.get("role")
+    display_name = data.get("display_name")
+    if not isinstance(user_id, str) or not user_id.strip():
+        return jsonify({"error": "user_id required"}), 400
+    if role not in ("patient", "clinician"):
+        return jsonify({"error": "role must be 'patient' or 'clinician'"}), 400
+    if not isinstance(display_name, str) or not display_name.strip():
+        return jsonify({"error": "display_name required"}), 400
+
+    try:
+        get_client().auth.admin.get_user_by_id(user_id)
+    except Exception:
+        return jsonify({"error": "No such Supabase Auth user"}), 404
+
+    try:
+        get_client().table("profiles").insert({
+            "id": user_id, "role": role, "display_name": display_name.strip(),
+        }).execute()
+    except Exception:
+        return jsonify({"error": "Profile already exists for this account"}), 409
+
+    return jsonify({"id": user_id, "role": role, "display_name": display_name.strip()}), 201
 
 
 @app.route("/api/health", methods=["GET"])
