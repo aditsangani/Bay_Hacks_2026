@@ -1,0 +1,30 @@
+# Render Blueprint — deploys the NeuroTriage-Home check-in pipeline as
+# a Render Workflow (required for the "Best Use of Render" track).
+#
+# This deploys ALONGSIDE your existing Flask app, not instead of it.
+# Your frontend keeps talking to Flask on localhost:5001 as normal;
+# this Workflow service exists specifically so you have a real,
+# triggerable Render Workflow run to show in the dashboard for judges.
+#
+# Setup:
+#   1. Push this file (at the repo root) and backend/workflow.py to GitHub.
+#   2. In the Render dashboard: New -> Blueprint -> select this repo.
+#   3. Render should detect this file automatically. If it asks you to
+#      pick a service type manually instead, choose "Workflow".
+#   4. Once deployed, trigger a run of `run_checkin_pipeline` from the
+#      dashboard with sample patient_id / image_b64 / voice_metrics
+#      values to show a live run for your demo.
+#
+# Confirm this file's exact schema (keys, allowed values) against
+# Render's current docs before deploying — Workflows is a newer
+# product and the blueprint format may have changed.
+
+services:
+  - type: workflow
+    name: neurotriage-workflow
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: python backend/workflow.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
