@@ -10,6 +10,40 @@ FHIR-shaped observation designed around HIPAA principles.
 
 ---
 
+## Quick start (macOS / zsh)
+
+Open Terminal and run:
+
+```zsh
+cd /path/to/Bay_Hacks_2026
+cd backend
+rm -rf venv
+python3.11 -m venv venv
+source venv/bin/activate
+python -m pip install -r requirements.txt
+python app.py
+```
+
+Replace `/path/to/Bay_Hacks_2026` with the folder where you cloned or
+downloaded this project. If your terminal is already open at the project
+root (the folder containing `backend/` and `frontend/`), skip that `cd` line.
+
+Leave the backend terminal running. It serves on `http://127.0.0.1:5001`.
+
+Open a **second terminal** for the frontend:
+
+```zsh
+cd /path/to/Bay_Hacks_2026/frontend
+npm install
+npm run dev -- --host 127.0.0.1
+```
+
+Open `http://127.0.0.1:5173` in your browser. Replace `/path/to/Bay_Hacks_2026`
+with the same project folder used in the backend terminal.
+
+Python 3.11 is required because the pinned MediaPipe dependency does not
+support Python 3.12 or newer.
+
 ## Quick start (Windows / PowerShell)
 
 Clone the repo, then `cd` into it. You should see `backend/` and
