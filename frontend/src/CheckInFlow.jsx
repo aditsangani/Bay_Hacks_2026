@@ -314,17 +314,6 @@ export default function CheckInFlow() {
               )}
 
               {finalResult.wellness && <div className="mt-6"><WellnessSummary wellness={finalResult.wellness} /></div>}
-
-              <div className="mt-8 space-y-3">
-                <details className="rounded-2xl border border-black/10 bg-black/[0.015] p-4 dark:border-white/10 dark:bg-white/[0.02]">
-                  <summary className="cursor-pointer text-sm font-medium text-black/70 dark:text-white/70">De-identified telemetry payload</summary>
-                  <pre className="tabular mt-3 overflow-x-auto text-xs text-black/45 dark:text-white/45">{JSON.stringify(finalResult.telemetry_payload, null, 2)}</pre>
-                </details>
-                <details className="rounded-2xl border border-black/10 bg-black/[0.015] p-4 dark:border-white/10 dark:bg-white/[0.02]">
-                  <summary className="cursor-pointer text-sm font-medium text-black/70 dark:text-white/70">FHIR-shaped observation (demo only)</summary>
-                  <pre className="tabular mt-3 overflow-x-auto text-xs text-black/45 dark:text-white/45">{JSON.stringify(finalResult.fhir_shaped_observation, null, 2)}</pre>
-                </details>
-              </div>
             </Card>
           </motion.div>
         )}
