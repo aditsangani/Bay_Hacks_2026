@@ -13,7 +13,8 @@ import { Activity, ShieldAlert, ListChecks, Clock } from 'lucide-react'
 import { Card, RiskBadge, riskHex } from './components/ui.jsx'
 
 /**
- * Clinician trend dashboard.
+ * Clinician trend dashboard, reachable via the Clinician tab in the
+ * top nav (see App.jsx). Loads the latest check-in history on mount.
  *
  * Every load of this component calls GET /api/dashboard/:patient_id,
  * which logs a mock audit entry server-side (see backend/audit_log.py).
