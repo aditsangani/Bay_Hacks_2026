@@ -11,23 +11,31 @@ FHIR-shaped observation designed around HIPAA principles.
 
 ---
 
-## Database setup (Supabase)
+## Database & auth setup (Supabase)
 
-Check-in history and the clinician audit log can be persisted in
-[Supabase](https://supabase.com) — a hosted Postgres instance. Supabase is
-optional for local development: without `database/.env`, the app automatically
-uses process-local memory so the full check-in still works, but history is lost
-when the backend restarts.
+This app uses [Supabase](https://supabase.com) for two things: persisting
+check-in history / the clinician audit log, and real login (Supabase Auth,
+email/password) for both patients and clinicians. **Login always requires a
+real Supabase project — there is no offline fallback for auth.** (Check-in
+storage alone has a fallback: without `database/.env`, `check_ins`/`audit_log`
+fall back to process-local memory, but you still can't log in without Supabase
+configured, so in practice you need both `.env` files below for the app to be
+usable at all.)
+
+**This repo already commits `database/.env`** with a shared project's
+credentials (a deliberate hackathon-only choice — see the note at the bottom
+of this section) — you likely don't need to redo steps 1–4 below unless you
+want your own project. **`frontend/.env` is NOT committed** (it's gitignored
+like normal), so every clone needs step 5 done locally, even if you're using
+the shared project from `database/.env`.
 
 1. Create a project at [supabase.com](https://supabase.com) (or use an
    existing one).
 2. Open **SQL Editor → New query** in the Supabase dashboard, paste in
    the contents of [`database/schema.sql`](database/schema.sql), and
-   run it. This creates two tables: `check_ins` and `audit_log`. Run the
-   file again after pulling updates; its `add column if not exists` statements
-   safely add the camera-estimate fields to an existing `check_ins` table.
-   Until that migration is run, the backend remains compatible by storing
-   camera estimates inside the existing `wellness` JSON column.
+   run it. This creates the `check_ins`, `audit_log`, and `profiles` tables.
+   Run the file again after pulling updates; its `add column if not exists`
+   statements safely add new fields to an existing `check_ins` table.
 3. In the dashboard, go to **Project Settings → API** and copy the
    **Project URL** and the **`service_role` key** (not the `anon` key
    — this backend needs to read/write freely without fighting
@@ -39,12 +47,30 @@ when the backend restarts.
    copy .env.example .env      # macOS/Linux: cp .env.example .env
    ```
    Open `database/.env` and fill in `SUPABASE_URL` and `SUPABASE_KEY`
-   with the values from step 3. This file is gitignored — never commit
-   real credentials.
+   with the values from step 3.
+5. **Required even if you're using the shared `database/.env`:** the
+   frontend needs its own env file with the **anon/public** key (safe for
+   the browser, different from `service_role`) — find it on the same API
+   Keys page, under the "Legacy anon, service_role API keys" tab.
+   ```powershell
+   cd frontend
+   copy .env.example .env      # macOS/Linux: cp .env.example .env
+   ```
+   Fill in `VITE_SUPABASE_URL` (same Project URL as step 3/4) and
+   `VITE_SUPABASE_ANON_KEY` (the anon key, not service_role). Restart
+   `npm run dev` after creating or editing this file — Vite only reads
+   `.env` at startup.
 
 The backend (`backend/app.py`) automatically picks up `database/.env`
 via `database/db.py`, regardless of which directory you run `python
 app.py` from.
+
+> **Why `database/.env` is committed at all:** normally this file must never
+> be committed (it's real credentials). It was deliberately pushed once for
+> this hackathon so teammates could skip individual setup — meaning the
+> `service_role` key in git history is effectively public. Don't replicate
+> this pattern outside a short-lived hackathon repo; rotate that key in the
+> Supabase dashboard once judging is done.
 
 ## Quick start (macOS / zsh)
 
@@ -243,10 +269,18 @@ protobuf noise, not errors. As long as you see `Running on
 http://127.0.0.1:5001` and no traceback, the server is fine.
 
 ### `RuntimeError: SUPABASE_URL and SUPABASE_KEY must be set`
-You skipped [Database setup](#database-setup-supabase), or
+You skipped [Database & auth setup](#database--auth-setup-supabase), or
 `database/.env` doesn't exist / isn't filled in yet. Copy
 `database/.env.example` to `database/.env` and fill in your Supabase
 project's URL and service_role key, then restart `python app.py`.
+
+### Sign up / log in does nothing, or the page is blank/broken
+`frontend/.env` is missing — it's gitignored and NOT included when you
+clone the repo, even though `database/.env` is. Copy
+`frontend/.env.example` to `frontend/.env`, fill in `VITE_SUPABASE_URL`
+and `VITE_SUPABASE_ANON_KEY` (see [Database & auth setup](#database--auth-setup-supabase)
+step 5), then restart `npm run dev` — Vite only reads `.env` at startup,
+so an existing `npm run dev` process won't pick up a newly created file.
 
 ### `response_latency_ms` looks huge (100,000+)
 This field currently measures total conversation length (start of
