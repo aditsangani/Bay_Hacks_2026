@@ -15,7 +15,7 @@ from db import get_client
 TABLE = "check_ins"
 
 
-def append(patient_id: str, metrics: dict, risk: dict):
+def append(patient_id: str, metrics: dict, risk: dict, face_analysis: dict = None, wellness: dict = None):
     row = {
         "patient_id": patient_id,
         "facial_asymmetry_score": metrics.get("facial_asymmetry_score"),
@@ -24,6 +24,9 @@ def append(patient_id: str, metrics: dict, risk: dict):
         "risk_score": risk.get("risk_score"),
         "risk_level": risk.get("risk_level"),
         "flags": risk.get("flags", []),
+        "face_method": (face_analysis or {}).get("method"),
+        "face_sample_count": (face_analysis or {}).get("sample_count"),
+        "wellness": wellness,
     }
     get_client().table(TABLE).insert(row).execute()
 
@@ -70,6 +73,11 @@ def _to_history_entry(row: dict) -> dict:
             "risk_level": row["risk_level"],
             "flags": row.get("flags") or [],
         },
+        "face_analysis": {
+            "method": row.get("face_method"),
+            "sample_count": row.get("face_sample_count"),
+        },
+        "wellness": row.get("wellness"),
         "timestamp": _to_epoch(row["created_at"]),
     }
 

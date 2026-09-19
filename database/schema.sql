@@ -9,6 +9,9 @@ create table if not exists check_ins (
   risk_score double precision,
   risk_level text,
   flags jsonb default '[]'::jsonb,
+  face_method text,
+  face_sample_count integer,
+  wellness jsonb,
   created_at timestamptz not null default now()
 );
 

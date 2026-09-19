@@ -51,9 +51,9 @@ def _hash_patient_id(patient_id: str) -> str:
 
 def compute_risk_score(metrics: CheckInMetrics, baseline: Optional[dict] = None) -> dict:
     """
-    Simple weighted anomaly score. `baseline` is the patient's own
-    rolling average from prior check-ins (pass None for a first-ever
-    check-in, in which case we only flag absolute threshold breaches).
+    Simple weighted demo score using absolute thresholds. The baseline
+    parameter is retained for callers, but is not used by this formula.
+    Sleep and wellbeing answers do not modify this score.
 
     Returns a risk breakdown dict, not just a single number — showing
     your work here is what "sound data-to-insight pipeline" scores on
@@ -63,9 +63,6 @@ def compute_risk_score(metrics: CheckInMetrics, baseline: Optional[dict] = None)
     weighted_score = 0.0
 
     if metrics.facial_asymmetry_score is not None:
-        delta = metrics.facial_asymmetry_score
-        if baseline and "facial_asymmetry_score" in baseline:
-            delta = abs(metrics.facial_asymmetry_score - baseline["facial_asymmetry_score"])
         if metrics.facial_asymmetry_score > FACIAL_ASYMMETRY_THRESHOLD:
             flags.append("facial_asymmetry_above_threshold")
             weighted_score += 0.45

@@ -2,7 +2,9 @@
 NeuroTriage-Home backend — hackathon starter.
 
 Endpoints:
-  POST /api/checkin/face       -> analyze one webcam frame, return facial asymmetry metrics
+  POST /api/checkin/face/preview -> transient landmark tracking, nothing persisted
+  POST /api/checkin/face       -> analyze a short burst, store facial asymmetry metrics
+  POST /api/checkin/wellness/plan -> adaptive sleep, symptoms, and mood questions
   POST /api/checkin/voice      -> receive ElevenLabs agent output (transcript + latency), return voice metrics
   POST /api/checkin/submit     -> combine face + voice metrics for a check-in, score risk, log to dashboard
   GET  /api/dashboard/:patient -> get trend history + latest risk for a patient (clinician view)
@@ -17,12 +19,13 @@ NOTE ON PRIVACY / HIPAA-principles boundary:
   - Raw frames/audio are processed in-memory and discarded. Nothing in
     this file writes raw image or audio bytes to disk, to Supabase, or
     anywhere else.
-  - Only numeric derived metrics ever get stored, in the Supabase
-    check_ins table (see ../database/patient_history.py). The raw
-    patient_id is stored there too (needed to look up a patient's own
-    trend), but only the HASHED version ever leaves via telemetry
-    payloads / FHIR observations (see anomaly_scoring.py's
-    _hash_patient_id).
+  - Only numeric derived metrics and structured wellbeing responses
+    ever get stored, in the Supabase check_ins table (see
+    ../database/patient_history.py). The raw patient_id is stored
+    there too (needed to look up a patient's own trend), but only the
+    HASHED version ever leaves via telemetry payloads / FHIR
+    observations (see anomaly_scoring.py's _hash_patient_id) — images
+    and landmark coordinates never enter patient history at all.
   - Requires SUPABASE_URL and SUPABASE_KEY — see
     ../database/.env.example and ../database/db.py.
 """
@@ -38,7 +41,8 @@ from flask_cors import CORS
 # cv_analysis/anomaly_scoring imports below.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "database"))
 
-from cv_analysis import score_from_base64_image
+from cv_analysis import score_from_base64_image, score_from_base64_images
+from wellness import evaluate_wellness
 from anomaly_scoring import (
     CheckInMetrics,
     compute_risk_score,
@@ -49,6 +53,7 @@ from audit_log import audit_log
 import patient_history
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 CORS(app)  # loosen for local dev; tighten origin before any real deploy
 
 # Temporary per-checkin cache so the /face and /voice steps can be
@@ -57,23 +62,60 @@ CORS(app)  # loosen for local dev; tighten origin before any real deploy
 PENDING_CHECKINS = {}
 
 
+@app.route("/api/checkin/face/preview", methods=["POST"])
+def preview_face():
+    """Transient tracking only: frames and landmarks never enter patient history."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not data.get("image_b64"):
+        return jsonify({"error": "image_b64 required"}), 400
+    try:
+        result = score_from_base64_image(data["image_b64"])
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@app.route("/api/checkin/wellness/plan", methods=["POST"])
+def wellness_plan():
+    """Choose follow-ups without persisting unfinished questionnaire answers."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get("answers"), dict):
+        return jsonify({"error": "answers must be an object"}), 400
+    try:
+        return jsonify(evaluate_wellness(data["answers"]))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.route("/api/checkin/face", methods=["POST"])
 def checkin_face():
     """
-    Body: { "patient_id": str, "image_b64": str }
-    image_b64 is a data URL from the browser's canvas.toDataURL().
-    We process it in-memory and immediately discard the frame.
+    Accept one legacy image_b64 or 3–5 images_b64 for a median capture.
+    Only derived measurements enter the pending cache, never landmarks/images.
     """
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
     patient_id = data.get("patient_id")
     image_b64 = data.get("image_b64")
 
-    if not patient_id or not image_b64:
-        return jsonify({"error": "patient_id and image_b64 required"}), 400
-
-    result = score_from_base64_image(image_b64)
-
-    PENDING_CHECKINS.setdefault(patient_id, {})["face"] = result
+    if not isinstance(patient_id, str) or not patient_id.strip():
+        return jsonify({"error": "patient_id required"}), 400
+    # A failed retake must not silently reuse an earlier accepted capture.
+    PENDING_CHECKINS.get(patient_id, {}).pop("face", None)
+    try:
+        if "images_b64" in data:
+            result = score_from_base64_images(data["images_b64"])
+        else:
+            result = score_from_base64_image(image_b64)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if not result["quality"]["acceptable"] or result["asymmetry_score"] is None:
+        return jsonify({**result, "error": result["quality"]["message"]}), 422
+    PENDING_CHECKINS.setdefault(patient_id, {})["face"] = {
+        key: result[key]
+        for key in ("asymmetry_score", "pair_deltas", "sample_count", "method")
+    }
     return jsonify(result)
 
 
@@ -117,15 +159,27 @@ def submit_checkin():
     derived metrics + hashed telemetry, and clears the pending cache
     (so raw-ish intermediate data doesn't linger).
     """
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
     patient_id = data.get("patient_id")
 
-    if not patient_id or patient_id not in PENDING_CHECKINS:
+    if not isinstance(patient_id, str) or patient_id not in PENDING_CHECKINS:
         return jsonify({"error": "no pending face/voice data for this patient_id"}), 400
 
-    pending = PENDING_CHECKINS.pop(patient_id)
+    pending = PENDING_CHECKINS[patient_id]
     face = pending.get("face", {})
     voice = pending.get("voice", {})
+    if face.get("asymmetry_score") is None or "voice" not in pending:
+        return jsonify({"error": "Complete a valid face capture and voice step first"}), 400
+    wellness = None
+    if "wellness" in data:
+        try:
+            wellness = evaluate_wellness(data["wellness"], require_complete=True)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if wellness["urgent"]:
+            return jsonify({"error": "Seek urgent help for sudden new symptoms; do not wait for this check-in."}), 422
 
     metrics = CheckInMetrics(
         patient_id=patient_id,
@@ -140,6 +194,7 @@ def submit_checkin():
     telemetry = build_telemetry_payload(metrics, risk)
     fhir_observation = build_fhir_shaped_observation(telemetry)
 
+    face_analysis = {"method": face["method"], "sample_count": face["sample_count"]}
     patient_history.append(
         patient_id,
         metrics={
@@ -148,10 +203,15 @@ def submit_checkin():
             "response_latency_ms": metrics.response_latency_ms,
         },
         risk=risk,
+        face_analysis=face_analysis,
+        wellness=wellness,
     )
+    PENDING_CHECKINS.pop(patient_id, None)
 
     return jsonify({
         "risk": risk,
+        "wellness": wellness,
+        "face_analysis": face_analysis,
         "telemetry_payload": telemetry,       # what actually gets transmitted (de-identified)
         "fhir_shaped_observation": fhir_observation,  # for your architecture slide/demo
     })
