@@ -9,11 +9,12 @@ import {
   Tooltip,
   ReferenceLine,
 } from 'recharts'
-import { Activity, ShieldAlert, ListChecks, Clock } from 'lucide-react'
+import { Activity, ShieldAlert, ListChecks, Clock, HeartPulse, Wind, AlertTriangle, CalendarClock, Siren } from 'lucide-react'
 import { Card, RiskBadge, riskHex } from './components/ui.jsx'
 import { useTheme } from './hooks/useTheme.js'
 import { useAuth } from './context/AuthContext.jsx'
 import PatientSelector from './components/PatientSelector.jsx'
+import WellnessSummary from './components/WellnessSummary.jsx'
 
 /**
  * Clinician trend dashboard, reachable via the Clinician tab in the
@@ -23,6 +24,26 @@ import PatientSelector from './components/PatientSelector.jsx'
  * server-side (see database/audit_log.py). GET /api/audit-log
  * surfaces that trail live in the demo.
  */
+
+const TRIAGE_STYLES = {
+  1: { label: 'Tier 1 · Stable', color: '#0ca30c', Icon: CalendarClock },
+  2: { label: 'Tier 2 · Elevated Trend', color: '#fab219', Icon: AlertTriangle },
+  3: { label: 'Tier 3 · Acute Alert', color: '#d03b3b', Icon: Siren },
+}
+
+function TriageBadge({ triage }) {
+  const style = TRIAGE_STYLES[triage?.tier] || TRIAGE_STYLES[1]
+  const Icon = style.Icon
+  return (
+    <span
+      className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-semibold ring-1"
+      style={{ color: style.color, borderColor: `${style.color}4d`, backgroundColor: `${style.color}12` }}
+    >
+      <Icon size={14} />
+      {style.label}
+    </span>
+  )
+}
 
 function StatTile({ icon: Icon, label, value, accent }) {
   return (
@@ -107,6 +128,7 @@ export default function ClinicianDashboard() {
     label: new Date(h.timestamp * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
     risk_score: h.risk.risk_score,
     risk_level: h.risk.risk_level,
+    triage: h.risk.triage,
   }))
 
   const latest = history[history.length - 1]
@@ -135,7 +157,12 @@ export default function ClinicianDashboard() {
             )}
           </p>
         </div>
-        {latest && <RiskBadge level={latest.risk.risk_level} />}
+        {latest && (
+          <div className="flex flex-col items-end gap-2">
+            <TriageBadge triage={latest.risk.triage} />
+            <RiskBadge level={latest.risk.risk_level} />
+          </div>
+        )}
       </div>
 
       {!patientsLoading && <PatientSelector patients={patients} selectedPatientId={selectedPatientId} onChange={setSelectedPatientId} />}
@@ -146,7 +173,29 @@ export default function ClinicianDashboard() {
         <Card className="p-10 text-center text-sm text-black/40 dark:text-white/40">No check-ins yet.</Card>
       ) : (
         <>
-          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {latest.risk.triage && (
+            <Card
+              className="mb-6 border-l-4 p-5"
+              style={{ borderLeftColor: TRIAGE_STYLES[latest.risk.triage.tier]?.color || TRIAGE_STYLES[1].color }}
+            >
+              <div className="flex items-start gap-3">
+                <ShieldAlert
+                  size={20}
+                  style={{ color: TRIAGE_STYLES[latest.risk.triage.tier]?.color || TRIAGE_STYLES[1].color }}
+                />
+                <div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h2 className="text-sm font-semibold text-black dark:text-white">Escalation pathway</h2>
+                    <TriageBadge triage={latest.risk.triage} />
+                  </div>
+                  <p className="mt-2 text-sm text-black/60 dark:text-white/60">{latest.risk.triage.reason}</p>
+                  <p className="mt-1 text-sm font-medium text-black dark:text-white">{latest.risk.triage.action}</p>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
             <StatTile icon={ListChecks} label="Check-ins" value={history.length} accent="#8b5cf6" />
             <StatTile
               icon={Activity}
@@ -169,7 +218,25 @@ export default function ClinicianDashboard() {
               })}
               accent="#38bdf8"
             />
+            <StatTile
+              icon={HeartPulse}
+              label="Est. pulse"
+              value={latest.vital_signs ? `${latest.vital_signs.heart_rate_bpm} BPM` : '—'}
+              accent="#fb7185"
+            />
+            <StatTile
+              icon={Wind}
+              label="Est. breathing"
+              value={latest.vital_signs ? `${latest.vital_signs.breathing_rate_bpm} / min` : '—'}
+              accent="#22d3ee"
+            />
           </div>
+
+          {latest.wellness && (
+            <div className="mb-6">
+              <WellnessSummary wellness={latest.wellness} />
+            </div>
+          )}
 
           <Card className="mb-6 p-6">
             <div className="mb-4 flex items-center justify-between">
@@ -248,8 +315,11 @@ export default function ClinicianDashboard() {
                   <tr className="border-b border-black/10 text-xs uppercase tracking-wide text-black/30 dark:border-white/10 dark:text-white/30">
                     <th className="px-6 py-3 font-medium">Timestamp</th>
                     <th className="px-6 py-3 font-medium">Facial asymmetry</th>
+                    <th className="px-6 py-3 font-medium">Camera estimates</th>
+                    <th className="px-6 py-3 font-medium">Sleep & wellbeing</th>
                     <th className="px-6 py-3 font-medium">Voice jitter</th>
                     <th className="px-6 py-3 font-medium">Latency (ms)</th>
+                    <th className="px-6 py-3 font-medium">Triage</th>
                     <th className="px-6 py-3 font-medium">Risk</th>
                   </tr>
                 </thead>
@@ -262,9 +332,40 @@ export default function ClinicianDashboard() {
                         <td className="tabular px-6 py-3 text-black/40 dark:text-white/40">
                           {new Date(h.timestamp * 1000).toLocaleString()}
                         </td>
-                        <td className="tabular px-6 py-3">{h.metrics.facial_asymmetry_score ?? '—'}</td>
+                        <td className="tabular px-6 py-3">
+                          {h.metrics.facial_asymmetry_score ?? '—'}
+                          <span className="mt-1 block text-xs text-black/40 dark:text-white/40">
+                            {h.face_analysis?.method === 'pose_corrected_v2'
+                              ? `Tilt-adjusted · ${h.face_analysis.sample_count} frames`
+                              : 'Original method'}
+                          </span>
+                        </td>
+                        <td className="tabular px-6 py-3">
+                          {h.vital_signs ? (
+                            <>
+                              <span className="block">{h.vital_signs.heart_rate_bpm} BPM</span>
+                              <span className="block">{h.vital_signs.breathing_rate_bpm} breaths/min</span>
+                            </>
+                          ) : <span className="text-black/40 dark:text-white/40">Not collected</span>}
+                        </td>
+                        <td className="px-6 py-3">
+                          {h.wellness ? (
+                            <details className="min-w-56">
+                              <summary className="cursor-pointer text-black/70 dark:text-white/70">
+                                {h.wellness.answers.hours_sleep === null
+                                  ? 'Sleep not shared'
+                                  : `${h.wellness.answers.hours_sleep} hours sleep`}
+                                {' · View responses'}
+                              </summary>
+                              <div className="mt-3"><WellnessSummary wellness={h.wellness} /></div>
+                            </details>
+                          ) : <span className="text-black/40 dark:text-white/40">Not collected</span>}
+                        </td>
                         <td className="tabular px-6 py-3">{h.metrics.voice_jitter ?? '—'}</td>
                         <td className="tabular px-6 py-3">{h.metrics.response_latency_ms ?? '—'}</td>
+                        <td className="px-6 py-3">
+                          <TriageBadge triage={h.risk.triage} />
+                        </td>
                         <td className="px-6 py-3">
                           <RiskBadge level={h.risk.risk_level} />
                         </td>

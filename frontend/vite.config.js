@@ -6,9 +6,10 @@ export default defineConfig({
   root: '.',
   publicDir: 'public',
   server: {
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:5001',
+      '/api': 'http://127.0.0.1:5001',
     },
   },
 })

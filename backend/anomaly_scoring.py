@@ -28,6 +28,27 @@ FACIAL_ASYMMETRY_THRESHOLD = 0.015     # tune against baseline check-ins
 SPEECH_JITTER_THRESHOLD = 0.02         # placeholder; real value from Parselmouth calibration
 RESPONSE_LATENCY_THRESHOLD_MS = 2500   # slower-than-baseline response
 TREND_WINDOW_DAYS = 5                  # how many check-ins to compare against baseline
+ACUTE_FACIAL_ASYMMETRY_THRESHOLD = 0.03
+ACUTE_SPEECH_JITTER_THRESHOLD = 0.04
+ACUTE_RESPONSE_LATENCY_THRESHOLD_MS = 5000
+
+TRIAGE_BANDS = {
+    1: {
+        "label": "Stable",
+        "color": "green",
+        "action": "Schedule standard next morning check-in.",
+    },
+    2: {
+        "label": "Elevated Trend",
+        "color": "amber",
+        "action": "Route an asynchronous notification to the care coordinator for review within 24 hours.",
+    },
+    3: {
+        "label": "Acute Alert",
+        "color": "red",
+        "action": "Dispatch emergency services or schedule immediate telehealth triage.",
+    },
+}
 
 
 @dataclass
@@ -49,7 +70,55 @@ def _hash_patient_id(patient_id: str) -> str:
     return hashlib.sha256(patient_id.encode("utf-8")).hexdigest()[:16]
 
 
-def compute_risk_score(metrics: CheckInMetrics, baseline: Optional[dict] = None) -> dict:
+def _has_three_day_drift(history: list[dict], metric_name: str, threshold: float) -> bool:
+    values = [entry.get("metrics", {}).get(metric_name) for entry in history[-3:]]
+    if len(values) != 3 or any(value is None for value in values):
+        return False
+    return values[0] < values[1] < values[2] and values[-1] > threshold
+
+
+def _triage_band(metrics: CheckInMetrics, history: list[dict]) -> dict:
+    acute_flags = []
+    if (metrics.facial_asymmetry_score is not None
+            and metrics.facial_asymmetry_score >= ACUTE_FACIAL_ASYMMETRY_THRESHOLD):
+        acute_flags.append("acute_facial_asymmetry_threshold_crossed")
+    if metrics.voice_jitter is not None and metrics.voice_jitter >= ACUTE_SPEECH_JITTER_THRESHOLD:
+        acute_flags.append("tremor_tolerance_threshold_crossed")
+    if (metrics.response_latency_ms is not None
+            and metrics.response_latency_ms >= ACUTE_RESPONSE_LATENCY_THRESHOLD_MS):
+        acute_flags.append("acute_response_latency_threshold_crossed")
+
+    if acute_flags:
+        tier = 3
+        reason = "Sudden change crossed an acute FAST or tremor-tolerance proxy threshold."
+    elif (
+        _has_three_day_drift(history, "facial_asymmetry_score", FACIAL_ASYMMETRY_THRESHOLD)
+        or _has_three_day_drift(history, "voice_jitter", SPEECH_JITTER_THRESHOLD)
+        or _has_three_day_drift(history, "response_latency_ms", RESPONSE_LATENCY_THRESHOLD_MS)
+    ):
+        tier = 2
+        reason = "Three consecutive check-ins show worsening symmetry or fluency metrics."
+        acute_flags = ["three_day_consecutive_drift"]
+    else:
+        tier = 1
+        reason = "Metrics are within normal variance for routine monitoring."
+
+    band = TRIAGE_BANDS[tier]
+    return {
+        "tier": tier,
+        "label": band["label"],
+        "color": band["color"],
+        "action": band["action"],
+        "reason": reason,
+        "flags": acute_flags,
+    }
+
+
+def compute_risk_score(
+    metrics: CheckInMetrics,
+    baseline: Optional[dict] = None,
+    history: Optional[list[dict]] = None,
+) -> dict:
     """
     Simple weighted demo score using absolute thresholds. The baseline
     parameter is retained for callers, but is not used by this formula.
@@ -83,10 +152,20 @@ def compute_risk_score(metrics: CheckInMetrics, baseline: Optional[dict] = None)
     elif weighted_score >= 0.3:
         risk_level = "moderate"
 
+    prior_history = list(history or []) + [{
+        "metrics": {
+            "facial_asymmetry_score": metrics.facial_asymmetry_score,
+            "voice_jitter": metrics.voice_jitter,
+            "response_latency_ms": metrics.response_latency_ms,
+        }
+    }]
+    triage = _triage_band(metrics, prior_history)
+
     return {
         "risk_score": round(weighted_score, 3),
         "risk_level": risk_level,
         "flags": flags,
+        "triage": triage,
     }
 
 
@@ -107,6 +186,7 @@ def build_telemetry_payload(metrics: CheckInMetrics, risk: dict) -> dict:
         "risk_score": risk["risk_score"],
         "risk_level": risk["risk_level"],
         "flags": risk["flags"],
+        "triage": risk["triage"],
     }
 
 

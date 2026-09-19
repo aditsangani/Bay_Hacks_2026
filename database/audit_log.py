@@ -1,6 +1,6 @@
 """
-Clinician audit log for access to patient records, persisted in
-Supabase (table: audit_log).
+Clinician audit log for access to patient records, persisted in Supabase
+(table: audit_log) when configured, with a process-local development fallback.
 
 This is intentionally NOT a tamper-proof/append-only-enforced log
 (that's a whole infrastructure project) — it's a real Postgres table
@@ -11,11 +11,14 @@ your pitch that a production version would enforce true immutability
 (e.g. a write-once log table or a service like AWS QLDB).
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
+from threading import Lock
 
-from db import get_client
+from db import get_client, is_configured
 
 TABLE = "audit_log"
+_LOCAL_ENTRIES = []
+_LOCAL_LOCK = Lock()
 
 
 class SupabaseAuditLog:
@@ -25,9 +28,27 @@ class SupabaseAuditLog:
             "action": action,
             "target_patient_hash": target_patient_hash,
         }
+        if not is_configured():
+            row["created_at"] = datetime.now(timezone.utc).isoformat()
+            with _LOCAL_LOCK:
+                _LOCAL_ENTRIES.append(row)
+            return
         get_client().table(TABLE).insert(row).execute()
 
     def all_entries(self):
+        if not is_configured():
+            with _LOCAL_LOCK:
+                rows = [dict(row) for row in reversed(_LOCAL_ENTRIES)]
+            return [
+                {
+                    "timestamp": _to_epoch(row["created_at"]),
+                    "clinician_id": row["clinician_id"],
+                    "action": row["action"],
+                    "target_patient_hash": row.get("target_patient_hash"),
+                }
+                for row in rows
+            ]
+
         result = (
             get_client()
             .table(TABLE)
