@@ -262,16 +262,18 @@ export default function CheckInFlow() {
               <div className="mb-5 flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/5 ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/15"><Mic className="text-black dark:text-white" size={18} /></div>
                 <div>
-                  <h2 className="text-xl font-semibold tracking-tight text-black dark:text-white">Answer the voice prompts</h2>
-                  <p className="text-xs text-black/45 dark:text-white/45">Speak naturally while the assistant guides you.</p>
+                  <h2 className="text-xl font-semibold tracking-tight text-black dark:text-white">Talk with your check-in assistant</h2>
+                  <p className="text-xs text-black/45 dark:text-white/45">The conversation adapts to what you have shared and what you say next.</p>
                 </div>
               </div>
               <p className="rounded-2xl border border-black/10 bg-black/[0.02] p-4 text-xs text-black/50 dark:border-white/10 dark:bg-white/[0.02] dark:text-white/50">
-                Use the voice assistant bubble in the bottom-right corner to start the conversation.
+                Use the voice assistant bubble in the bottom-right corner. It will ask one question at a time and follow the concerns that matter to you.
               </p>
               {createPortal(
                 // eslint-disable-next-line react/no-unknown-property
-                <elevenlabs-convai agent-id={ELEVENLABS_AGENT_ID}></elevenlabs-convai>,
+                <elevenlabs-convai
+                  agent-id={ELEVENLABS_AGENT_ID}
+                ></elevenlabs-convai>,
                 document.body
               )}
               <Button onClick={finishVoiceStep} disabled={submitting} className="mt-6 w-full">

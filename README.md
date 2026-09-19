@@ -205,9 +205,10 @@ from the neurological signal risk score.
    the general sign-up link — the credits don't apply automatically
    just by visiting the site from a redemption link.
 2. In the sidebar, click **Create agent → Blank Agent**.
-3. Set the **System Prompt** and **First Message** (see
-   `docs/elevenlabs-agent-prompt.md` if present, or ask a teammate who
-   already has this saved).
+3. Follow [`docs/elevenlabs-agent-prompt.md`](docs/elevenlabs-agent-prompt.md).
+   Configure the adaptive system prompt and broad first message in the agent
+   dashboard. The app sends no conversation overrides, so the default
+   ElevenLabs security settings can remain unchanged.
 4. Pick a voice, save the agent.
 5. Get the **Agent ID** from the agent's page URL — it's the segment
    that looks like `agent_xxxxxxxxxxxxxxxxxxxxxxxxx`.
