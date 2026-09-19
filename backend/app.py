@@ -26,12 +26,14 @@ NOTE ON PRIVACY / HIPAA-principles boundary:
     HASHED version ever leaves via telemetry payloads / FHIR
     observations (see anomaly_scoring.py's _hash_patient_id) — images
     and landmark coordinates never enter patient history at all.
-  - Requires SUPABASE_URL and SUPABASE_KEY — see
-    ../database/.env.example and ../database/db.py.
+  - SUPABASE_URL and SUPABASE_KEY enable durable storage. Without them,
+    local development uses process-memory history that clears on restart.
+    See ../database/.env.example and ../database/db.py.
 """
 
 import os
 import sys
+import math
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -50,6 +52,7 @@ from anomaly_scoring import (
     build_fhir_shaped_observation,
 )
 from audit_log import audit_log
+from db import is_configured as database_is_configured
 import patient_history
 
 app = Flask(__name__)
@@ -60,6 +63,34 @@ CORS(app)  # loosen for local dev; tighten origin before any real deploy
 # combined before final scoring, without writing raw data to disk or
 # to Supabase until both halves of a check-in are in.
 PENDING_CHECKINS = {}
+
+
+def _validated_vital_signs(value):
+    """Validate browser-derived estimates before storing numeric results."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("vital_signs must be an object")
+
+    def number(name, minimum, maximum):
+        item = value.get(name)
+        if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item):
+            raise ValueError(f"{name} must be a finite number")
+        if not minimum <= item <= maximum:
+            raise ValueError(f"{name} is outside the supported camera-estimate range")
+        return round(float(item), 1)
+
+    method = value.get("method")
+    if method not in {"camera_rppg_pos_v1", "camera_rppg_pos_v2"}:
+        raise ValueError("Unsupported camera vital-sign method")
+
+    return {
+        "heart_rate_bpm": number("heart_rate_bpm", 35, 220),
+        "breathing_rate_bpm": number("breathing_rate_bpm", 4, 60),
+        "duration_seconds": number("duration_seconds", 20, 90),
+        "sample_count": int(number("sample_count", 160, 3000)),
+        "method": method,
+    }
 
 
 @app.route("/api/checkin/face/preview", methods=["POST"])
@@ -104,6 +135,7 @@ def checkin_face():
     # A failed retake must not silently reuse an earlier accepted capture.
     PENDING_CHECKINS.get(patient_id, {}).pop("face", None)
     try:
+        vital_signs = _validated_vital_signs(data.get("vital_signs"))
         if "images_b64" in data:
             result = score_from_base64_images(data["images_b64"])
         else:
@@ -116,6 +148,8 @@ def checkin_face():
         key: result[key]
         for key in ("asymmetry_score", "pair_deltas", "sample_count", "method")
     }
+    PENDING_CHECKINS[patient_id]["face"]["vital_signs"] = vital_signs
+    result["vital_signs"] = vital_signs
     return jsonify(result)
 
 
@@ -188,30 +222,45 @@ def submit_checkin():
         response_latency_ms=voice.get("response_latency_ms"),
     )
 
-    baseline = patient_history.latest_metrics_for(patient_id)
+    try:
+        baseline = patient_history.latest_metrics_for(patient_id)
+    except Exception:
+        app.logger.exception("Could not read patient history")
+        return jsonify({
+            "error": "Patient-history storage is unavailable. Check the Supabase settings and rerun database/schema.sql, then try again."
+        }), 503
 
     risk = compute_risk_score(metrics, baseline)
     telemetry = build_telemetry_payload(metrics, risk)
     fhir_observation = build_fhir_shaped_observation(telemetry)
 
+    vital_signs = face.get("vital_signs")
     face_analysis = {"method": face["method"], "sample_count": face["sample_count"]}
-    patient_history.append(
-        patient_id,
-        metrics={
-            "facial_asymmetry_score": metrics.facial_asymmetry_score,
-            "voice_jitter": metrics.voice_jitter,
-            "response_latency_ms": metrics.response_latency_ms,
-        },
-        risk=risk,
-        face_analysis=face_analysis,
-        wellness=wellness,
-    )
+    try:
+        patient_history.append(
+            patient_id,
+            metrics={
+                "facial_asymmetry_score": metrics.facial_asymmetry_score,
+                "voice_jitter": metrics.voice_jitter,
+                "response_latency_ms": metrics.response_latency_ms,
+            },
+            risk=risk,
+            face_analysis=face_analysis,
+            wellness=wellness,
+            vital_signs=vital_signs,
+        )
+    except Exception:
+        app.logger.exception("Could not save patient history")
+        return jsonify({
+            "error": "The check-in could not be saved. Check the Supabase settings and rerun database/schema.sql, then try again."
+        }), 503
     PENDING_CHECKINS.pop(patient_id, None)
 
     return jsonify({
         "risk": risk,
         "wellness": wellness,
         "face_analysis": face_analysis,
+        "vital_signs": vital_signs,
         "telemetry_payload": telemetry,       # what actually gets transmitted (de-identified)
         "fhir_shaped_observation": fhir_observation,  # for your architecture slide/demo
     })
@@ -238,7 +287,7 @@ def get_audit_log():
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "storage": "supabase" if database_is_configured() else "memory"})
 
 
 if __name__ == "__main__":

@@ -9,9 +9,10 @@ import {
   Tooltip,
   ReferenceLine,
 } from 'recharts'
-import { Activity, ShieldAlert, ListChecks, Clock } from 'lucide-react'
+import { Activity, ShieldAlert, ListChecks, Clock, HeartPulse, Wind } from 'lucide-react'
 import { Card, RiskBadge, riskHex } from './components/ui.jsx'
 import { useTheme } from './hooks/useTheme.js'
+import WellnessSummary from './components/WellnessSummary.jsx'
 
 /**
  * Clinician trend dashboard, reachable via the Clinician tab in the
@@ -110,7 +111,7 @@ export default function ClinicianDashboard() {
         <Card className="p-10 text-center text-sm text-black/40 dark:text-white/40">No check-ins yet.</Card>
       ) : (
         <>
-          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
             <StatTile icon={ListChecks} label="Check-ins" value={history.length} accent="#8b5cf6" />
             <StatTile
               icon={Activity}
@@ -133,7 +134,25 @@ export default function ClinicianDashboard() {
               })}
               accent="#38bdf8"
             />
+            <StatTile
+              icon={HeartPulse}
+              label="Est. pulse"
+              value={latest.vital_signs ? `${latest.vital_signs.heart_rate_bpm} BPM` : '—'}
+              accent="#fb7185"
+            />
+            <StatTile
+              icon={Wind}
+              label="Est. breathing"
+              value={latest.vital_signs ? `${latest.vital_signs.breathing_rate_bpm} / min` : '—'}
+              accent="#22d3ee"
+            />
           </div>
+
+          {latest.wellness && (
+            <div className="mb-6">
+              <WellnessSummary wellness={latest.wellness} />
+            </div>
+          )}
 
           <Card className="mb-6 p-6">
             <div className="mb-4 flex items-center justify-between">
@@ -212,6 +231,8 @@ export default function ClinicianDashboard() {
                   <tr className="border-b border-black/10 text-xs uppercase tracking-wide text-black/30 dark:border-white/10 dark:text-white/30">
                     <th className="px-6 py-3 font-medium">Timestamp</th>
                     <th className="px-6 py-3 font-medium">Facial asymmetry</th>
+                    <th className="px-6 py-3 font-medium">Camera estimates</th>
+                    <th className="px-6 py-3 font-medium">Sleep & wellbeing</th>
                     <th className="px-6 py-3 font-medium">Voice jitter</th>
                     <th className="px-6 py-3 font-medium">Latency (ms)</th>
                     <th className="px-6 py-3 font-medium">Risk</th>
@@ -226,7 +247,36 @@ export default function ClinicianDashboard() {
                         <td className="tabular px-6 py-3 text-black/40 dark:text-white/40">
                           {new Date(h.timestamp * 1000).toLocaleString()}
                         </td>
-                        <td className="tabular px-6 py-3">{h.metrics.facial_asymmetry_score ?? '—'}</td>
+                        <td className="tabular px-6 py-3">
+                          {h.metrics.facial_asymmetry_score ?? '—'}
+                          <span className="mt-1 block text-xs text-black/40 dark:text-white/40">
+                            {h.face_analysis?.method === 'pose_corrected_v2'
+                              ? `Tilt-adjusted · ${h.face_analysis.sample_count} frames`
+                              : 'Original method'}
+                          </span>
+                        </td>
+                        <td className="tabular px-6 py-3">
+                          {h.vital_signs ? (
+                            <>
+                              <span className="block">{h.vital_signs.heart_rate_bpm} BPM</span>
+                              <span className="block">{h.vital_signs.breathing_rate_bpm} breaths/min</span>
+                              <span className="mt-1 block text-xs capitalize text-black/40 dark:text-white/40">{h.vital_signs.confidence} confidence</span>
+                            </>
+                          ) : <span className="text-black/40 dark:text-white/40">Not collected</span>}
+                        </td>
+                        <td className="px-6 py-3">
+                          {h.wellness ? (
+                            <details className="min-w-56">
+                              <summary className="cursor-pointer text-black/70 dark:text-white/70">
+                                {h.wellness.answers.hours_sleep === null
+                                  ? 'Sleep not shared'
+                                  : `${h.wellness.answers.hours_sleep} hours sleep`}
+                                {' · View responses'}
+                              </summary>
+                              <div className="mt-3"><WellnessSummary wellness={h.wellness} /></div>
+                            </details>
+                          ) : <span className="text-black/40 dark:text-white/40">Not collected</span>}
+                        </td>
                         <td className="tabular px-6 py-3">{h.metrics.voice_jitter ?? '—'}</td>
                         <td className="tabular px-6 py-3">{h.metrics.response_latency_ms ?? '—'}</td>
                         <td className="px-6 py-3">
