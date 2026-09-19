@@ -15,7 +15,14 @@ from db import get_client
 TABLE = "check_ins"
 
 
-def append(patient_id: str, metrics: dict, risk: dict, face_analysis: dict = None, wellness: dict = None):
+def append(
+    patient_id: str,
+    metrics: dict,
+    risk: dict,
+    face_analysis: dict = None,
+    wellness: dict = None,
+    vital_signs: dict = None,
+):
     row = {
         "patient_id": patient_id,
         "facial_asymmetry_score": metrics.get("facial_asymmetry_score"),
@@ -24,9 +31,13 @@ def append(patient_id: str, metrics: dict, risk: dict, face_analysis: dict = Non
         "risk_score": risk.get("risk_score"),
         "risk_level": risk.get("risk_level"),
         "flags": risk.get("flags", []),
+        "triage_tier": risk.get("triage", {}).get("tier"),
+        "triage_label": risk.get("triage", {}).get("label"),
+        "triage_action": risk.get("triage", {}).get("action"),
         "face_method": (face_analysis or {}).get("method"),
         "face_sample_count": (face_analysis or {}).get("sample_count"),
         "wellness": wellness,
+        "vital_signs": vital_signs,
     }
     get_client().table(TABLE).insert(row).execute()
 
@@ -72,12 +83,19 @@ def _to_history_entry(row: dict) -> dict:
             "risk_score": row["risk_score"],
             "risk_level": row["risk_level"],
             "flags": row.get("flags") or [],
+            "triage": {
+                "tier": row.get("triage_tier") or 1,
+                "label": row.get("triage_label") or "Stable",
+                "color": {1: "green", 2: "amber", 3: "red"}.get(row.get("triage_tier") or 1, "green"),
+                "action": row.get("triage_action") or "Schedule standard next morning check-in.",
+            },
         },
         "face_analysis": {
             "method": row.get("face_method"),
             "sample_count": row.get("face_sample_count"),
         },
         "wellness": row.get("wellness"),
+        "vital_signs": row.get("vital_signs"),
         "timestamp": _to_epoch(row["created_at"]),
     }
 

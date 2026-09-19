@@ -223,6 +223,7 @@ def submit_checkin():
     )
 
     try:
+        prior_history = patient_history.history_for(patient_id)
         baseline = patient_history.latest_metrics_for(patient_id)
     except Exception:
         app.logger.exception("Could not read patient history")
@@ -230,7 +231,7 @@ def submit_checkin():
             "error": "Patient-history storage is unavailable. Check the Supabase settings and rerun database/schema.sql, then try again."
         }), 503
 
-    risk = compute_risk_score(metrics, baseline)
+    risk = compute_risk_score(metrics, baseline, prior_history)
     telemetry = build_telemetry_payload(metrics, risk)
     fhir_observation = build_fhir_shaped_observation(telemetry)
 
