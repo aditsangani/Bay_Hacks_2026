@@ -75,6 +75,14 @@ Open `http://localhost:5173` in your browser.
 **You need Node.js installed** for this — check with `node --version`.
 If missing, install from nodejs.org.
 
+## App views
+
+Use the **Patient check-in** and **Clinician dashboard** buttons at the
+top of the app to switch views. The app starts in the patient view, and
+opening the clinician view reloads the latest check-in history. Switching
+away from a check-in resets its progress and stops the camera; returning
+to the patient view starts at the consent screen.
+
 ---
 
 ## ElevenLabs setup (required for the voice check-in step)

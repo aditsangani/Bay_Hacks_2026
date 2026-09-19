@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react'
 
 /**
- * Minimal clinician trend dashboard. Not wired into main.jsx by default —
- * either add a route/toggle, or just render this instead of CheckInFlow
- * when you're demoing the clinician side.
+ * Minimal clinician trend dashboard, accessible through the view toggle
+ * in main.jsx. Switching to this view loads the latest check-in history.
  *
  * Every load of this component calls GET /api/dashboard/:patient_id,
  * which logs a mock audit entry server-side (see backend/audit_log.py).

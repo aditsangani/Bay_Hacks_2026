@@ -40,6 +40,7 @@ export default function CheckInFlow() {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
+  const mountedRef = useRef(true)
 
   // --- Load ElevenLabs widget script once ---
   useEffect(() => {
@@ -54,6 +55,10 @@ export default function CheckInFlow() {
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
@@ -69,6 +74,14 @@ export default function CheckInFlow() {
       streamRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      stopCamera()
+    }
+  }, [stopCamera])
 
   const handleConsent = async () => {
     setConsented(true)

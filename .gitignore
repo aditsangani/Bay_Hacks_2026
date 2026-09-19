@@ -1,5 +1,7 @@
 ﻿backend/venv/
 frontend/node_modules/
+frontend/dist/
+backend/venv-py312/
 __pycache__/
 *.pyc
 .env
