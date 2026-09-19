@@ -238,6 +238,13 @@ Render Workflow demo.
 4. In Supabase → Authentication → URL Configuration, set **Site URL** to the
    frontend's Render URL so confirmation emails link back to it.
 
+Signup on the Render deploy skips email confirmation: `ALLOW_AUTO_CONFIRM_SIGNUP`
+(API) and `VITE_AUTO_CONFIRM_SIGNUP` (frontend) make `POST /api/signup` create
+already-confirmed accounts, because Supabase's built-in email sender is
+rate-limited. The trade-off is that emails are not verified. Remove both
+variables to go back to normal email confirmation (which needs a custom SMTP
+provider under Supabase → Authentication → SMTP Settings to work at scale).
+
 The API runs one gunicorn worker on purpose (in-flight check-ins are held in
 process memory). MediaPipe is memory-hungry; if face capture crashes the API on
 the free tier, move it to a paid instance. Never set `ALLOW_DEMO_AUTH` in a

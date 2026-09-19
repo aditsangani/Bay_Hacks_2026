@@ -67,6 +67,8 @@ class FakeAuthClient:
         self.existing_profile_ids = set(existing_profile_ids or [])
         self.patients = patients or []
         self.insert_calls = []
+        self.created_emails = set()
+        self.deleted_user_ids = []
 
     def get_user(self, token):
         if not token or ":" not in token:
@@ -74,6 +76,16 @@ class FakeAuthClient:
         user_id, _, role = token.partition(":")
         self.role_by_user_id[user_id] = role
         return type("Resp", (), {"user": type("U", (), {"id": user_id})()})()
+
+    def create_user(self, attrs):
+        if attrs["email"] in self.created_emails:
+            raise ValueError("already registered")
+        self.created_emails.add(attrs["email"])
+        self.auth_user_ids.add("created-user")
+        return type("Resp", (), {"user": type("U", (), {"id": "created-user"})()})()
+
+    def delete_user(self, user_id):
+        self.deleted_user_ids.append(user_id)
 
     def get_user_by_id(self, user_id):
         if user_id not in self.auth_user_ids:
@@ -158,6 +170,50 @@ class ProfileEndpointTests(unittest.TestCase):
             "user_id": "new-user", "role": "admin", "display_name": "New Patient",
         })
         self.assertEqual(response.status_code, 400)
+
+
+class SignupEndpointTests(unittest.TestCase):
+    BODY = {"email": "new@example.com", "password": "secret1", "role": "patient", "display_name": "New"}
+
+    def setUp(self):
+        self.fake_client = FakeAuthClient()
+        for module in (api_auth, api):
+            patcher = patch.object(module, "get_client", lambda: self.fake_client)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.client = api.app.test_client()
+
+    def enabled(self):
+        return patch.object(api, "AUTO_CONFIRM_SIGNUP", True)
+
+    def test_disabled_by_default(self):
+        self.assertEqual(self.client.post("/api/signup", json=self.BODY).status_code, 404)
+
+    def test_creates_confirmed_user_and_profile(self):
+        with self.enabled():
+            response = self.client.post("/api/signup", json=self.BODY)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.fake_client.insert_calls[0]["role"], "patient")
+
+    def test_duplicate_email_returns_409(self):
+        with self.enabled():
+            self.client.post("/api/signup", json=self.BODY)
+            response = self.client.post("/api/signup", json=self.BODY)
+        self.assertEqual(response.status_code, 409)
+
+    def test_short_password_or_bad_role_returns_400(self):
+        with self.enabled():
+            short = self.client.post("/api/signup", json={**self.BODY, "password": "abc"})
+            role = self.client.post("/api/signup", json={**self.BODY, "role": "admin"})
+        self.assertEqual(short.status_code, 400)
+        self.assertEqual(role.status_code, 400)
+
+    def test_profile_failure_rolls_back_the_auth_user(self):
+        self.fake_client.existing_profile_ids.add("created-user")
+        with self.enabled():
+            response = self.client.post("/api/signup", json=self.BODY)
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(self.fake_client.deleted_user_ids, ["created-user"])
 
 
 if __name__ == "__main__":

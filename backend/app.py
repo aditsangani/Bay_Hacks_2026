@@ -346,6 +346,57 @@ def create_profile():
     return jsonify({"id": user_id, "role": role, "display_name": display_name.strip()}), 201
 
 
+# Opt-in: lets the API create already-confirmed accounts server-side, for
+# deployments where Supabase's email confirmation can't be used (built-in
+# sender is rate-limited). Accounts created this way have UNVERIFIED emails.
+AUTO_CONFIRM_SIGNUP = os.environ.get("ALLOW_AUTO_CONFIRM_SIGNUP", "").lower() in {"1", "true", "yes"}
+MIN_PASSWORD_LENGTH = 6
+
+
+@app.route("/api/signup", methods=["POST"])
+def signup():
+    """Create a confirmed Supabase user plus its profile in one step (opt-in)."""
+    if not AUTO_CONFIRM_SIGNUP:
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    email = data.get("email")
+    password = data.get("password")
+    role = data.get("role")
+    display_name = data.get("display_name")
+    if not isinstance(email, str) or "@" not in email or not email.strip():
+        return jsonify({"error": "A valid email is required"}), 400
+    if not isinstance(password, str) or len(password) < MIN_PASSWORD_LENGTH:
+        return jsonify({"error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters"}), 400
+    if role not in ("patient", "clinician"):
+        return jsonify({"error": "role must be 'patient' or 'clinician'"}), 400
+    if not isinstance(display_name, str) or not display_name.strip():
+        return jsonify({"error": "display_name required"}), 400
+
+    try:
+        created = get_client().auth.admin.create_user(
+            {"email": email.strip(), "password": password, "email_confirm": True}
+        )
+    except Exception:
+        return jsonify({"error": "Could not create the account. It may already exist."}), 409
+    user_id = created.user.id
+
+    try:
+        get_client().table("profiles").insert({
+            "id": user_id, "role": role, "display_name": display_name.strip(),
+        }).execute()
+    except Exception:
+        # Don't leave an auth user with no role behind.
+        try:
+            get_client().auth.admin.delete_user(user_id)
+        except Exception:
+            app.logger.exception("Could not roll back auth user after profile failure")
+        return jsonify({"error": "Could not save the account profile. Please try again."}), 500
+
+    return jsonify({"id": user_id, "role": role, "display_name": display_name.strip()}), 201
+
+
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "storage": "supabase" if database_is_configured() else "memory"})

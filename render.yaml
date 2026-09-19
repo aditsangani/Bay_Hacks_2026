@@ -35,6 +35,11 @@ services:
       # Local-only demo identities (see backend/auth.py). Must stay off in production.
       - key: ALLOW_DEMO_AUTH
         value: "0"
+      # Creates already-confirmed accounts server-side (POST /api/signup) because
+      # Supabase's built-in email sender is rate-limited. Emails are UNVERIFIED.
+      # Remove this and VITE_AUTO_CONFIRM_SIGNUP to use normal email confirmation.
+      - key: ALLOW_AUTO_CONFIRM_SIGNUP
+        value: "1"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY   # service_role key (server-only, never the anon key)
@@ -51,6 +56,8 @@ services:
         sync: false
       - key: VITE_SUPABASE_ANON_KEY
         sync: false
+      - key: VITE_AUTO_CONFIRM_SIGNUP
+        value: "1"
     routes:
       - type: rewrite
         source: /api/*

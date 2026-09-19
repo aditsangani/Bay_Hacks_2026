@@ -68,6 +68,26 @@ export function AuthProvider({ children }) {
   // below once it has been created.
   const signUp = async (email, password, role, displayName) => {
     if (supabaseDemoMode) return { error: new Error('Account creation is disabled in local demo mode.') }
+
+    // Opt-in path (VITE_AUTO_CONFIRM_SIGNUP=1, with ALLOW_AUTO_CONFIRM_SIGNUP on
+    // the API): the backend creates an already-confirmed account, so no
+    // confirmation email is sent, then we log straight in.
+    if (import.meta.env.VITE_AUTO_CONFIRM_SIGNUP === '1') {
+      const res = await fetch('/api/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, role, display_name: displayName }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        return { error: new Error(body.error || 'Could not create your account') }
+      }
+      const { data: signedIn, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+      if (signInError) return { error: signInError }
+      await loadProfile(signedIn.user.id)
+      return { error: null, needsConfirmation: false }
+    }
+
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) return { error }
 
