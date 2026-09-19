@@ -3,11 +3,14 @@
 @tailwind utilities;
 
 html {
+  color-scheme: light;
+}
+html.dark {
   color-scheme: dark;
 }
 
 body {
-  @apply bg-black text-white antialiased;
+  @apply bg-white text-black antialiased transition-colors duration-200 dark:bg-black dark:text-white;
   position: relative;
   min-height: 100vh;
 }
@@ -18,6 +21,14 @@ body::before {
   inset: 0;
   z-index: -2;
   pointer-events: none;
+  transition: background 0.2s ease;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(124, 58, 237, 0.06), transparent 45%),
+    radial-gradient(circle at 85% 10%, rgba(59, 130, 246, 0.05), transparent 45%),
+    radial-gradient(circle at 50% 100%, rgba(236, 72, 153, 0.04), transparent 50%),
+    #ffffff;
+}
+.dark body::before {
   background:
     radial-gradient(circle at 15% 0%, rgba(124, 58, 237, 0.20), transparent 45%),
     radial-gradient(circle at 85% 10%, rgba(59, 130, 246, 0.16), transparent 45%),
@@ -31,12 +42,15 @@ body::after {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: 0.05;
+  opacity: 0.035;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.dark body::after {
+  opacity: 0.05;
 }
 
 ::selection {
-  @apply bg-white/20 text-white;
+  @apply bg-black/10 text-black dark:bg-white/20 dark:text-white;
 }
 
 ::-webkit-scrollbar {
@@ -47,14 +61,14 @@ body::after {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-white/10 rounded-full;
+  @apply bg-black/10 dark:bg-white/10 rounded-full;
 }
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-white/20;
+  @apply bg-black/20 dark:bg-white/20;
 }
 
 .glass {
-  @apply bg-white/[0.03] border border-white/10 backdrop-blur-2xl;
+  @apply bg-black/[0.02] border border-black/10 backdrop-blur-2xl dark:bg-white/[0.03] dark:border-white/10;
 }
 
 .tabular {

@@ -10,9 +10,40 @@ FHIR-shaped observation designed around HIPAA principles.
 
 ---
 
+## Database setup (Supabase)
+
+Check-in history and the clinician audit log are persisted in
+[Supabase](https://supabase.com) — a hosted Postgres instance — instead
+of the in-memory dict/list this started as, so a check-in's trend
+survives restarting the backend.
+
+1. Create a project at [supabase.com](https://supabase.com) (or use an
+   existing one).
+2. Open **SQL Editor → New query** in the Supabase dashboard, paste in
+   the contents of [`database/schema.sql`](database/schema.sql), and
+   run it. This creates two tables: `check_ins` and `audit_log`.
+3. In the dashboard, go to **Project Settings → API** and copy the
+   **Project URL** and the **`service_role` key** (not the `anon` key
+   — this backend needs to read/write freely without fighting
+   row-level-security policies, and the service_role key is only ever
+   used server-side, never sent to the frontend).
+4. From the project root:
+   ```powershell
+   cd database
+   copy .env.example .env      # macOS/Linux: cp .env.example .env
+   ```
+   Open `database/.env` and fill in `SUPABASE_URL` and `SUPABASE_KEY`
+   with the values from step 3. This file is gitignored — never commit
+   real credentials.
+
+The backend (`backend/app.py`) automatically picks up `database/.env`
+via `database/db.py`, regardless of which directory you run `python
+app.py` from.
+
 ## Quick start (macOS / zsh)
 
-Open Terminal and run:
+Set up the [database](#database-setup-supabase) first, then open
+Terminal and run:
 
 ```zsh
 cd /path/to/Bay_Hacks_2026
@@ -50,7 +81,14 @@ Clone the repo, then `cd` into it. You should see `backend/` and
 `frontend/` folders directly — if you don't, you're in the wrong
 directory (see [Troubleshooting](#troubleshooting) below).
 
-### 1. Backend
+### 1. Database (Supabase)
+
+Check-in history and the clinician audit log are persisted in Supabase
+(see [Database setup](#database-setup-supabase) below) — set this up
+**before** starting the backend, or `/api/checkin/submit` and
+`/api/dashboard/:patient` will fail with a missing-env-var error.
+
+### 2. Backend
 
 ```powershell
 cd backend
@@ -94,7 +132,7 @@ protobuf, jax, and other heavy dependencies. If the terminal looks
 "stuck" but no error has appeared, it's still unpacking/installing.
 Give it a couple of minutes before assuming something's wrong.
 
-### 2. Frontend
+### 3. Frontend
 
 Open a **second terminal** (leave the backend running in the first):
 
@@ -189,6 +227,12 @@ Lines like `Created TensorFlow Lite XNNPACK delegate` or
 protobuf noise, not errors. As long as you see `Running on
 http://127.0.0.1:5001` and no traceback, the server is fine.
 
+### `RuntimeError: SUPABASE_URL and SUPABASE_KEY must be set`
+You skipped [Database setup](#database-setup-supabase), or
+`database/.env` doesn't exist / isn't filled in yet. Copy
+`database/.env.example` to `database/.env` and fill in your Supabase
+project's URL and service_role key, then restart `python app.py`.
+
 ### `response_latency_ms` looks huge (100,000+)
 This field currently measures total conversation length (start of
 voice step to clicking "I've finished the conversation"), not true
@@ -210,16 +254,21 @@ demo.
   wired to a real EHR.
 - **Real auth** — the dashboard route takes a `clinician_id` query
   param instead of a login system.
-- **Real immutable audit log** — `backend/audit_log.py` is an
-  in-memory list, not a tamper-proof store. A production version would
-  use an actual append-only log (e.g. AWS QLDB).
+- **Real immutable audit log** — `database/audit_log.py` now persists
+  to a real Postgres table via Supabase (survives restarts), but
+  nothing enforces true append-only/tamper-proof semantics — there's
+  just no update/delete code path. A production version would use an
+  actual write-once store (e.g. AWS QLDB).
 
 ## Privacy / HIPAA-principles boundary
 
 - Raw webcam frames are processed in memory and never written to disk,
-  client-side or server-side.
-- Only numeric derived metrics + a SHA-256 hash of the patient ID ever
-  leave the `/api/checkin/*` handlers or get stored — see
+  client-side or server-side, or to Supabase.
+- Only numeric derived metrics ever get stored (in Supabase's
+  `check_ins` table — see `database/patient_history.py`). The raw
+  patient_id is stored there too (needed to query a patient's own
+  trend), but only a SHA-256 hash of it ever leaves the
+  `/api/checkin/*` handlers in telemetry payloads — see
   `_hash_patient_id()` in `backend/anomaly_scoring.py`.
 - Consent screen is required before the camera/mic ever activates
   (`frontend/src/CheckInFlow.jsx`, `STEPS.CONSENT`).

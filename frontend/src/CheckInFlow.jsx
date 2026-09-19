@@ -186,8 +186,8 @@ export default function CheckInFlow() {
   return (
     <div className="mx-auto max-w-xl">
       <div className="mb-10 text-center">
-        <h1 className="text-4xl font-bold tracking-tight text-white">Daily Check-In</h1>
-        <p className="mt-2 text-base text-white/50">
+        <h1 className="text-4xl font-bold tracking-tight text-black dark:text-white">Daily Check-In</h1>
+        <p className="mt-2 text-base text-black/50 dark:text-white/50">
           A 60-second face + voice check-in to track your trend over time.
         </p>
       </div>
@@ -197,7 +197,7 @@ export default function CheckInFlow() {
       </div>
 
       {error && (
-        <div className="mb-5 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+        <div className="mb-5 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
           {error}
         </div>
@@ -207,22 +207,22 @@ export default function CheckInFlow() {
         {step === STEPS.CONSENT && (
           <motion.div key="consent" {...fade}>
             <Card className="p-8">
-              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
-                <ShieldCheck className="text-white" size={22} />
+              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-black/5 ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/15">
+                <ShieldCheck className="text-black dark:text-white" size={22} />
               </div>
-              <h2 className="text-xl font-semibold tracking-tight text-white">Before we start</h2>
-              <p className="mt-3 text-sm leading-relaxed text-white/50">
+              <h2 className="text-xl font-semibold tracking-tight text-black dark:text-white">Before we start</h2>
+              <p className="mt-3 text-sm leading-relaxed text-black/50 dark:text-white/50">
                 This check-in uses your camera and microphone briefly. Video is
                 processed on this session only and never stored — we save only
                 numeric measurements, not the video or audio itself. Your care
                 team will see your trend over time, not raw recordings.
               </p>
-              <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70 transition-colors hover:bg-white/[0.06]">
+              <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-2xl border border-black/10 bg-black/[0.02] p-4 text-sm text-black/70 transition-colors hover:bg-black/[0.05] dark:border-white/10 dark:bg-white/[0.03] dark:text-white/70 dark:hover:bg-white/[0.06]">
                 <input
                   type="checkbox"
                   checked={consented}
                   onChange={(e) => setConsented(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-white/20 bg-transparent text-white focus:ring-white/50"
+                  className="mt-0.5 h-4 w-4 rounded border-black/20 bg-transparent text-black focus:ring-black/40 dark:border-white/20 dark:text-white dark:focus:ring-white/50"
                 />
                 I understand and consent to this check-in
               </label>
@@ -242,16 +242,16 @@ export default function CheckInFlow() {
           <motion.div key="face" {...fade}>
             <Card className="p-8">
               <div className="mb-5 flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
-                  <Camera className="text-white" size={18} />
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/5 ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/15">
+                  <Camera className="text-black dark:text-white" size={18} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-semibold tracking-tight text-white">Face the camera</h2>
-                  <p className="text-xs text-white/40">Find a well-lit spot and look straight ahead.</p>
+                  <h2 className="text-xl font-semibold tracking-tight text-black dark:text-white">Face the camera</h2>
+                  <p className="text-xs text-black/40 dark:text-white/40">Find a well-lit spot and look straight ahead.</p>
                 </div>
               </div>
 
-              <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black">
+              <div className="relative overflow-hidden rounded-2xl border border-black/10 bg-black dark:border-white/10">
                 <video
                   ref={videoRef}
                   autoPlay
@@ -287,16 +287,16 @@ export default function CheckInFlow() {
           <motion.div key="voice" {...fade}>
             <Card className="p-8">
               <div className="mb-5 flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
-                  <Mic className="text-white" size={18} />
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/5 ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/15">
+                  <Mic className="text-black dark:text-white" size={18} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-semibold tracking-tight text-white">Answer the voice prompts</h2>
-                  <p className="text-xs text-white/40">Speak naturally — this measures fluency and response latency.</p>
+                  <h2 className="text-xl font-semibold tracking-tight text-black dark:text-white">Answer the voice prompts</h2>
+                  <p className="text-xs text-black/40 dark:text-white/40">Speak naturally — this measures fluency and response latency.</p>
                 </div>
               </div>
 
-              <p className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-xs text-white/40">
+              <p className="rounded-2xl border border-black/10 bg-black/[0.02] p-4 text-xs text-black/40 dark:border-white/10 dark:bg-white/[0.02] dark:text-white/40">
                 Use the voice assistant bubble in the bottom-right corner to start the conversation.
               </p>
 
@@ -331,14 +331,14 @@ export default function CheckInFlow() {
           <motion.div key="result" {...fade}>
             <Card className="p-8">
               <div className="flex flex-col items-center text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-black">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-black text-white dark:bg-white dark:text-black">
                   <CheckCircle2 size={26} />
                 </div>
-                <h2 className="mt-4 text-xl font-semibold tracking-tight text-white">Check-in complete</h2>
+                <h2 className="mt-4 text-xl font-semibold tracking-tight text-black dark:text-white">Check-in complete</h2>
                 <div className="mt-3">
                   <RiskBadge level={finalResult.risk.risk_level} />
                 </div>
-                <p className="mt-2 text-sm text-white/40">
+                <p className="mt-2 text-sm text-black/40 dark:text-white/40">
                   score <span className="tabular">{finalResult.risk.risk_score}</span>
                 </p>
 
@@ -347,7 +347,7 @@ export default function CheckInFlow() {
                     {finalResult.risk.flags.map((f) => (
                       <span
                         key={f}
-                        className="rounded-full bg-white/[0.04] px-3 py-1 text-xs text-white/50 ring-1 ring-white/10"
+                        className="rounded-full bg-black/[0.03] px-3 py-1 text-xs text-black/50 ring-1 ring-black/10 dark:bg-white/[0.04] dark:text-white/50 dark:ring-white/10"
                       >
                         {f.replaceAll('_', ' ')}
                       </span>
@@ -357,19 +357,19 @@ export default function CheckInFlow() {
               </div>
 
               <div className="mt-8 space-y-3">
-                <details className="group rounded-2xl border border-white/10 bg-white/[0.02] p-4 open:pb-4">
-                  <summary className="cursor-pointer list-none text-sm font-medium text-white/70 marker:content-none">
+                <details className="group rounded-2xl border border-black/10 bg-black/[0.015] p-4 open:pb-4 dark:border-white/10 dark:bg-white/[0.02]">
+                  <summary className="cursor-pointer list-none text-sm font-medium text-black/70 marker:content-none dark:text-white/70">
                     De-identified telemetry payload
                   </summary>
-                  <pre className="tabular mt-3 overflow-x-auto text-xs text-white/40">
+                  <pre className="tabular mt-3 overflow-x-auto text-xs text-black/40 dark:text-white/40">
                     {JSON.stringify(finalResult.telemetry_payload, null, 2)}
                   </pre>
                 </details>
-                <details className="group rounded-2xl border border-white/10 bg-white/[0.02] p-4 open:pb-4">
-                  <summary className="cursor-pointer list-none text-sm font-medium text-white/70 marker:content-none">
+                <details className="group rounded-2xl border border-black/10 bg-black/[0.015] p-4 open:pb-4 dark:border-white/10 dark:bg-white/[0.02]">
+                  <summary className="cursor-pointer list-none text-sm font-medium text-black/70 marker:content-none dark:text-white/70">
                     FHIR-shaped observation (demo only)
                   </summary>
-                  <pre className="tabular mt-3 overflow-x-auto text-xs text-white/40">
+                  <pre className="tabular mt-3 overflow-x-auto text-xs text-black/40 dark:text-white/40">
                     {JSON.stringify(finalResult.fhir_shaped_observation, null, 2)}
                   </pre>
                 </details>

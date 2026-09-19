@@ -15,16 +15,28 @@ Run:
 
 NOTE ON PRIVACY / HIPAA-principles boundary:
   - Raw frames/audio are processed in-memory and discarded. Nothing in
-    this file writes raw image or audio bytes to disk or to the
-    in-memory "database" below.
-  - Only numeric derived metrics + a hashed patient ID ever get stored
-    in PATIENT_HISTORY.
-  - In-memory dict "DB" below is for demo purposes only — swap for a
-    real DB before this goes anywhere near real patients.
+    this file writes raw image or audio bytes to disk, to Supabase, or
+    anywhere else.
+  - Only numeric derived metrics ever get stored, in the Supabase
+    check_ins table (see ../database/patient_history.py). The raw
+    patient_id is stored there too (needed to look up a patient's own
+    trend), but only the HASHED version ever leaves via telemetry
+    payloads / FHIR observations (see anomaly_scoring.py's
+    _hash_patient_id).
+  - Requires SUPABASE_URL and SUPABASE_KEY — see
+    ../database/.env.example and ../database/db.py.
 """
 
+import os
+import sys
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
+# database/ is a sibling of backend/, not a package under it — add it
+# to sys.path so `import db` / `import patient_history` etc. resolve,
+# the same way this directory is implicitly on sys.path for the
+# cv_analysis/anomaly_scoring imports below.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "database"))
 
 from cv_analysis import score_from_base64_image
 from anomaly_scoring import (
@@ -34,16 +46,14 @@ from anomaly_scoring import (
     build_fhir_shaped_observation,
 )
 from audit_log import audit_log
+import patient_history
 
 app = Flask(__name__)
 CORS(app)  # loosen for local dev; tighten origin before any real deploy
 
-# --- In-memory "DB" (demo only) ---
-# Keyed by raw patient_id for convenience server-side; only the HASHED
-# version of this ever leaves via telemetry payloads / FHIR observations.
-PATIENT_HISTORY = {}
 # Temporary per-checkin cache so the /face and /voice steps can be
-# combined before final scoring, without writing raw data to disk.
+# combined before final scoring, without writing raw data to disk or
+# to Supabase until both halves of a check-in are in.
 PENDING_CHECKINS = {}
 
 
@@ -124,23 +134,21 @@ def submit_checkin():
         response_latency_ms=voice.get("response_latency_ms"),
     )
 
-    history = PATIENT_HISTORY.get(patient_id, [])
-    baseline = history[-1]["metrics"] if history else None
+    baseline = patient_history.latest_metrics_for(patient_id)
 
     risk = compute_risk_score(metrics, baseline)
     telemetry = build_telemetry_payload(metrics, risk)
     fhir_observation = build_fhir_shaped_observation(telemetry)
 
-    history.append({
-        "metrics": {
+    patient_history.append(
+        patient_id,
+        metrics={
             "facial_asymmetry_score": metrics.facial_asymmetry_score,
             "voice_jitter": metrics.voice_jitter,
             "response_latency_ms": metrics.response_latency_ms,
         },
-        "risk": risk,
-        "timestamp": telemetry["timestamp"],
-    })
-    PATIENT_HISTORY[patient_id] = history
+        risk=risk,
+    )
 
     return jsonify({
         "risk": risk,
@@ -159,7 +167,7 @@ def dashboard(patient_id):
     clinician_id = request.args.get("clinician_id", "demo-clinician")
     audit_log.log(clinician_id, "view_patient_record", target_patient_hash=patient_id)
 
-    history = PATIENT_HISTORY.get(patient_id, [])
+    history = patient_history.history_for(patient_id)
     return jsonify({"patient_id": patient_id, "history": history})
 
 
