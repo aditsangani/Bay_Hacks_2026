@@ -62,6 +62,7 @@ services:
   - type: workflow
     name: neurotriage-workflow
     runtime: python
+    region: oregon
     buildCommand: pip install -r backend/requirements.txt
     startCommand: python backend/workflow.py
     envVars:
