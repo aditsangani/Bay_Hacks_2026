@@ -1,4 +1,16 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
+import { AnimatePresence, motion } from 'framer-motion'
+import {
+  ShieldCheck,
+  Camera,
+  Mic,
+  CheckCircle2,
+  AlertTriangle,
+  Loader2,
+  ChevronRight,
+} from 'lucide-react'
+import { Card, Button, ProgressSteps, RiskBadge } from './components/ui.jsx'
 
 /**
  * Daily 60-second check-in flow.
@@ -11,7 +23,6 @@ import React, { useRef, useState, useEffect, useCallback } from 'react'
  *  5. POST /api/checkin/submit -> combined risk score + FHIR-shaped payload
  *
  * SWAP BEFORE DEMO:
- *  - ELEVENLABS_AGENT_ID below with your real agent ID from the ElevenLabs dashboard
  *  - PATIENT_ID with real/mock patient selection UI if you have time
  *
  * ElevenLabs widget docs: https://elevenlabs.io/docs/conversational-ai/guides/quickstart
@@ -29,6 +40,20 @@ const STEPS = {
   RESULT: 'result',
 }
 
+const STEP_LIST = [
+  { key: STEPS.CONSENT, label: 'Consent' },
+  { key: STEPS.FACE, label: 'Face' },
+  { key: STEPS.VOICE, label: 'Voice' },
+  { key: STEPS.RESULT, label: 'Result' },
+]
+
+const fade = {
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -12 },
+  transition: { duration: 0.25, ease: 'easeOut' },
+}
+
 export default function CheckInFlow() {
   const [step, setStep] = useState(STEPS.CONSENT)
   const [consented, setConsented] = useState(false)
@@ -36,10 +61,13 @@ export default function CheckInFlow() {
   const [voiceStartTime, setVoiceStartTime] = useState(null)
   const [finalResult, setFinalResult] = useState(null)
   const [error, setError] = useState(null)
+  const [capturing, setCapturing] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
 
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
+  const mountedRef = useRef(true)
 
   // --- Load ElevenLabs widget script once ---
   useEffect(() => {
@@ -54,6 +82,10 @@ export default function CheckInFlow() {
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
@@ -70,6 +102,14 @@ export default function CheckInFlow() {
     }
   }, [])
 
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      stopCamera()
+    }
+  }, [stopCamera])
+
   const handleConsent = async () => {
     setConsented(true)
     setStep(STEPS.FACE)
@@ -80,6 +120,7 @@ export default function CheckInFlow() {
     const video = videoRef.current
     const canvas = canvasRef.current
     if (!video || !canvas) return
+    setCapturing(true)
 
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
@@ -100,6 +141,8 @@ export default function CheckInFlow() {
       setVoiceStartTime(Date.now())
     } catch (err) {
       setError('Face check-in failed: ' + err.message)
+    } finally {
+      setCapturing(false)
     }
   }
 
@@ -109,6 +152,7 @@ export default function CheckInFlow() {
   // this button simulates "conversation finished."
   const finishVoiceStep = async () => {
     const latencyMs = voiceStartTime ? Date.now() - voiceStartTime : null
+    setSubmitting(true)
 
     try {
       await fetch('/api/checkin/voice', {
@@ -134,90 +178,206 @@ export default function CheckInFlow() {
       setStep(STEPS.RESULT)
     } catch (err) {
       setError('Voice check-in failed: ' + err.message)
+    } finally {
+      setSubmitting(false)
     }
   }
 
   return (
-    <div style={{ maxWidth: 480, margin: '40px auto', fontFamily: 'sans-serif' }}>
-      <h2>NeuroTriage-Home — Daily Check-In</h2>
+    <div className="mx-auto max-w-xl">
+      <div className="mb-10 text-center">
+        <h1 className="text-4xl font-bold tracking-tight text-white">Daily Check-In</h1>
+        <p className="mt-2 text-base text-white/50">
+          A 60-second face + voice check-in to track your trend over time.
+        </p>
+      </div>
 
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      <div className="mb-8 px-2">
+        <ProgressSteps steps={STEP_LIST} current={step} />
+      </div>
 
-      {step === STEPS.CONSENT && (
-        <div>
-          <h3>Before we start</h3>
-          <p>
-            This check-in uses your camera and microphone briefly. Video is
-            processed on this session only and never stored — we save only
-            numeric measurements (not the video or audio itself). Your care
-            team will see your trend over time, not raw recordings.
-          </p>
-          <label>
-            <input
-              type="checkbox"
-              checked={consented}
-              onChange={(e) => setConsented(e.target.checked)}
-            />{' '}
-            I understand and consent to this check-in
-          </label>
-          <br />
-          <button disabled={!consented} onClick={handleConsent}>
-            Start check-in
-          </button>
+      {error && (
+        <div className="mb-5 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          {error}
         </div>
       )}
 
-      {step === STEPS.FACE && (
-        <div>
-          <h3>Step 1: Face a well-lit camera</h3>
-          <video ref={videoRef} autoPlay playsInline style={{ width: '100%' }} />
-          <canvas ref={canvasRef} style={{ display: 'none' }} />
-          <br />
-          <button onClick={captureFrame}>Capture</button>
-        </div>
-      )}
+      <AnimatePresence mode="wait">
+        {step === STEPS.CONSENT && (
+          <motion.div key="consent" {...fade}>
+            <Card className="p-8">
+              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
+                <ShieldCheck className="text-white" size={22} />
+              </div>
+              <h2 className="text-xl font-semibold tracking-tight text-white">Before we start</h2>
+              <p className="mt-3 text-sm leading-relaxed text-white/50">
+                This check-in uses your camera and microphone briefly. Video is
+                processed on this session only and never stored — we save only
+                numeric measurements, not the video or audio itself. Your care
+                team will see your trend over time, not raw recordings.
+              </p>
+              <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70 transition-colors hover:bg-white/[0.06]">
+                <input
+                  type="checkbox"
+                  checked={consented}
+                  onChange={(e) => setConsented(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-white/20 bg-transparent text-white focus:ring-white/50"
+                />
+                I understand and consent to this check-in
+              </label>
+              <Button
+                disabled={!consented}
+                onClick={handleConsent}
+                className="mt-6 w-full"
+              >
+                Start check-in
+                <ChevronRight size={16} />
+              </Button>
+            </Card>
+          </motion.div>
+        )}
 
-      {step === STEPS.VOICE && (
-        <div>
-          <h3>Step 2: Answer the voice prompts</h3>
-          {ELEVENLABS_AGENT_ID === 'REPLACE_WITH_YOUR_AGENT_ID' ? (
-            <p style={{ color: 'darkorange' }}>
-              Set ELEVENLABS_AGENT_ID in CheckInFlow.jsx to your real agent ID
-              from the ElevenLabs dashboard to see the widget here.
-            </p>
-          ) : (
-            // eslint-disable-next-line react/no-unknown-property
-            <elevenlabs-convai agent-id={ELEVENLABS_AGENT_ID}></elevenlabs-convai>
-          )}
-          <br />
-          <button onClick={finishVoiceStep}>I've finished the conversation</button>
-        </div>
-      )}
+        {step === STEPS.FACE && (
+          <motion.div key="face" {...fade}>
+            <Card className="p-8">
+              <div className="mb-5 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
+                  <Camera className="text-white" size={18} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold tracking-tight text-white">Face the camera</h2>
+                  <p className="text-xs text-white/40">Find a well-lit spot and look straight ahead.</p>
+                </div>
+              </div>
 
-      {step === STEPS.RESULT && finalResult && (
-        <div>
-          <h3>Check-in complete</h3>
-          <p>
-            Risk level: <strong>{finalResult.risk.risk_level}</strong> (score:{' '}
-            {finalResult.risk.risk_score})
-          </p>
-          {finalResult.risk.flags.length > 0 && (
-            <p>Flags: {finalResult.risk.flags.join(', ')}</p>
-          )}
-          <details>
-            <summary>De-identified telemetry payload (what actually gets sent)</summary>
-            <pre style={{ fontSize: 12, background: '#f4f4f4', padding: 8 }}>
-              {JSON.stringify(finalResult.telemetry_payload, null, 2)}
-            </pre>
-          </details>
-          <details>
-            <summary>FHIR-shaped observation (architecture demo only, not real FHIR)</summary>
-            <pre style={{ fontSize: 12, background: '#f4f4f4', padding: 8 }}>
-              {JSON.stringify(finalResult.fhir_shaped_observation, null, 2)}
-            </pre>
-          </details>
-        </div>
-      )}
+              <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="aspect-video w-full scale-x-[-1] object-cover"
+                />
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div className="h-40 w-40 rounded-full border-2 border-white/30" />
+                </div>
+              </div>
+              <canvas ref={canvasRef} className="hidden" />
+
+              <Button
+                onClick={captureFrame}
+                disabled={capturing}
+                className="mt-6 w-full"
+              >
+                {capturing ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Analyzing frame…
+                  </>
+                ) : (
+                  <>Capture</>
+                )}
+              </Button>
+            </Card>
+          </motion.div>
+        )}
+
+        {step === STEPS.VOICE && (
+          <motion.div key="voice" {...fade}>
+            <Card className="p-8">
+              <div className="mb-5 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
+                  <Mic className="text-white" size={18} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold tracking-tight text-white">Answer the voice prompts</h2>
+                  <p className="text-xs text-white/40">Speak naturally — this measures fluency and response latency.</p>
+                </div>
+              </div>
+
+              <p className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-xs text-white/40">
+                Use the voice assistant bubble in the bottom-right corner to start the conversation.
+              </p>
+
+              {/* Portalled to <body> — a `position: fixed` custom element docks relative to
+                  the nearest transformed ancestor, and framer-motion's animation transform
+                  on this step's wrapper would otherwise trap it away from the viewport corner. */}
+              {createPortal(
+                // eslint-disable-next-line react/no-unknown-property
+                <elevenlabs-convai agent-id={ELEVENLABS_AGENT_ID}></elevenlabs-convai>,
+                document.body
+              )}
+
+              <Button
+                onClick={finishVoiceStep}
+                disabled={submitting}
+                className="mt-6 w-full"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Scoring check-in…
+                  </>
+                ) : (
+                  "I've finished the conversation"
+                )}
+              </Button>
+            </Card>
+          </motion.div>
+        )}
+
+        {step === STEPS.RESULT && finalResult && (
+          <motion.div key="result" {...fade}>
+            <Card className="p-8">
+              <div className="flex flex-col items-center text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-black">
+                  <CheckCircle2 size={26} />
+                </div>
+                <h2 className="mt-4 text-xl font-semibold tracking-tight text-white">Check-in complete</h2>
+                <div className="mt-3">
+                  <RiskBadge level={finalResult.risk.risk_level} />
+                </div>
+                <p className="mt-2 text-sm text-white/40">
+                  score <span className="tabular">{finalResult.risk.risk_score}</span>
+                </p>
+
+                {finalResult.risk.flags.length > 0 && (
+                  <div className="mt-4 flex flex-wrap justify-center gap-2">
+                    {finalResult.risk.flags.map((f) => (
+                      <span
+                        key={f}
+                        className="rounded-full bg-white/[0.04] px-3 py-1 text-xs text-white/50 ring-1 ring-white/10"
+                      >
+                        {f.replaceAll('_', ' ')}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-8 space-y-3">
+                <details className="group rounded-2xl border border-white/10 bg-white/[0.02] p-4 open:pb-4">
+                  <summary className="cursor-pointer list-none text-sm font-medium text-white/70 marker:content-none">
+                    De-identified telemetry payload
+                  </summary>
+                  <pre className="tabular mt-3 overflow-x-auto text-xs text-white/40">
+                    {JSON.stringify(finalResult.telemetry_payload, null, 2)}
+                  </pre>
+                </details>
+                <details className="group rounded-2xl border border-white/10 bg-white/[0.02] p-4 open:pb-4">
+                  <summary className="cursor-pointer list-none text-sm font-medium text-white/70 marker:content-none">
+                    FHIR-shaped observation (demo only)
+                  </summary>
+                  <pre className="tabular mt-3 overflow-x-auto text-xs text-white/40">
+                    {JSON.stringify(finalResult.fhir_shaped_observation, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
