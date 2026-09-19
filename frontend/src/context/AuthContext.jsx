@@ -60,11 +60,12 @@ export function AuthProvider({ children }) {
     }
   }, [loadProfile])
 
-  // Email confirmation is required (the standard flow), so signUp()
-  // normally returns no active session -- the profile can't be
-  // inserted client-side yet (RLS's auth.uid() has nothing to check
-  // against), so it's saved via the backend instead, which is allowed
-  // to write it ahead of confirmation using the service_role key.
+  // With email confirmation on, signUp() returns no active session, so the
+  // profile can't be inserted client-side (RLS's auth.uid() has nothing to
+  // check against) and is saved via the backend instead (service_role key).
+  // With confirmation off, a session exists immediately -- and its auth
+  // event fires before the profile row does -- so the profile is reloaded
+  // below once it has been created.
   const signUp = async (email, password, role, displayName) => {
     if (supabaseDemoMode) return { error: new Error('Account creation is disabled in local demo mode.') }
     const { data, error } = await supabase.auth.signUp({ email, password })
@@ -79,6 +80,8 @@ export function AuthProvider({ children }) {
       const body = await profileRes.json().catch(() => ({}))
       return { error: new Error(body.error || 'Could not save your profile') }
     }
+
+    if (data.session) await loadProfile(data.user.id)
 
     return { error: null, needsConfirmation: !data.session }
   }

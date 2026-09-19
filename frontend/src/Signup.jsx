@@ -1,11 +1,12 @@
 import React, { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { UserPlus, AlertTriangle, Loader2, MailCheck, User, Stethoscope } from 'lucide-react'
 import { Card, Button } from './components/ui.jsx'
 import { useAuth } from './context/AuthContext.jsx'
 
 export default function Signup() {
   const { signUp } = useAuth()
+  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
@@ -26,6 +27,10 @@ export default function Signup() {
     }
     if (needsConfirmation) {
       setConfirmationSent(true)
+    } else {
+      // Confirmation is off: the user is already logged in. ProtectedRoute
+      // sends clinicians on to /dashboard.
+      navigate('/')
     }
   }
 
