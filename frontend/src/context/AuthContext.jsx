@@ -1,13 +1,25 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
-import { supabase } from '../lib/supabaseClient.js'
+import { supabase, supabaseDemoMode } from '../lib/supabaseClient.js'
 
 const AuthContext = createContext(null)
+const DEMO_IDENTITIES = {
+  patient: {
+    access_token: 'demo-patient-token',
+    user: { id: 'demo-patient-001', email: 'patient@demo.local' },
+    displayName: 'Demo Patient',
+  },
+  clinician: {
+    access_token: 'demo-clinician-token',
+    user: { id: 'demo-clinician-001', email: 'clinician@demo.local' },
+    displayName: 'Demo Clinician',
+  },
+}
 
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(null)
-  const [role, setRole] = useState(null)
-  const [displayName, setDisplayName] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [session, setSession] = useState(() => supabaseDemoMode ? DEMO_IDENTITIES.patient : null)
+  const [role, setRole] = useState(() => supabaseDemoMode ? 'patient' : null)
+  const [displayName, setDisplayName] = useState(() => supabaseDemoMode ? DEMO_IDENTITIES.patient.displayName : null)
+  const [loading, setLoading] = useState(!supabaseDemoMode)
 
   const loadProfile = useCallback(async (userId) => {
     if (!userId) {
@@ -25,6 +37,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   useEffect(() => {
+    if (supabaseDemoMode) return undefined
     let mounted = true
 
     supabase.auth.getSession().then(async ({ data: { session: initialSession } }) => {
@@ -53,6 +66,7 @@ export function AuthProvider({ children }) {
   // against), so it's saved via the backend instead, which is allowed
   // to write it ahead of confirmation using the service_role key.
   const signUp = async (email, password, role, displayName) => {
+    if (supabaseDemoMode) return { error: new Error('Account creation is disabled in local demo mode.') }
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) return { error }
 
@@ -70,12 +84,22 @@ export function AuthProvider({ children }) {
   }
 
   const signIn = async (email, password) => {
+    if (supabaseDemoMode) return { error: new Error('Use the patient and clinician tabs in local demo mode.') }
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     return { error }
   }
 
   const signOut = async () => {
+    if (supabaseDemoMode) return
     await supabase.auth.signOut()
+  }
+
+  const switchDemoRole = (nextRole) => {
+    if (!supabaseDemoMode || !DEMO_IDENTITIES[nextRole]) return
+    const identity = DEMO_IDENTITIES[nextRole]
+    setSession(identity)
+    setRole(nextRole)
+    setDisplayName(identity.displayName)
   }
 
   const getAccessToken = () => session?.access_token ?? null
@@ -90,6 +114,8 @@ export function AuthProvider({ children }) {
     signIn,
     signOut,
     getAccessToken,
+    demoMode: supabaseDemoMode,
+    switchDemoRole,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

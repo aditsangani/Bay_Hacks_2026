@@ -84,7 +84,10 @@ async function getJSON(url, token) {
   const res = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
-  if (!res.ok) throw new Error(`Request to ${url} failed (${res.status})`)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || `Request to ${url} failed (${res.status})`)
+  }
   return res.json()
 }
 
@@ -99,27 +102,56 @@ export default function ClinicianDashboard() {
   const [history, setHistory] = useState([])
   const [auditEntries, setAuditEntries] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [loadError, setLoadError] = useState(null)
 
   // Patient list + audit log: fetched once on mount.
   useEffect(() => {
+    let cancelled = false
     const token = getAccessToken()
-    getJSON('/api/patients', token)
-      .then((list) => {
+    setLoadError(null)
+    Promise.all([
+      getJSON('/api/patients', token),
+      getJSON('/api/audit-log', token),
+    ])
+      .then(([list, entries]) => {
+        if (cancelled) return
         setPatients(list)
         setSelectedPatientId(list[0]?.patient_id ?? null)
+        setAuditEntries(entries)
       })
-      .finally(() => setPatientsLoading(false))
-    getJSON('/api/audit-log', token).then(setAuditEntries)
+      .catch((requestError) => {
+        if (cancelled) return
+        setPatients([])
+        setSelectedPatientId(null)
+        setAuditEntries([])
+        setLoadError(requestError.message || 'Could not load the clinician dashboard.')
+      })
+      .finally(() => {
+        if (!cancelled) setPatientsLoading(false)
+      })
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Patient history: re-fetched whenever the selected patient changes.
   useEffect(() => {
     if (!selectedPatientId) return
+    let cancelled = false
     setHistoryLoading(true)
+    setLoadError(null)
     getJSON(`/api/dashboard/${selectedPatientId}`, getAccessToken())
-      .then((data) => setHistory(data.history || []))
-      .finally(() => setHistoryLoading(false))
+      .then((data) => {
+        if (!cancelled) setHistory(data.history || [])
+      })
+      .catch((requestError) => {
+        if (cancelled) return
+        setHistory([])
+        setLoadError(requestError.message || 'Could not load this patient history.')
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false)
+      })
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPatientId])
 
@@ -164,6 +196,13 @@ export default function ClinicianDashboard() {
           </div>
         )}
       </div>
+
+      {loadError && (
+        <div role="alert" className="mb-6 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          {loadError}
+        </div>
+      )}
 
       {!patientsLoading && <PatientSelector patients={patients} selectedPatientId={selectedPatientId} onChange={setSelectedPatientId} />}
 

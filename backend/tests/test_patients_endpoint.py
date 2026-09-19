@@ -111,6 +111,15 @@ class PatientsEndpointTests(unittest.TestCase):
         response = self.client.get("/api/patients")
         self.assertEqual(response.status_code, 401)
 
+    def test_local_demo_clinician_gets_demo_patient(self):
+        with patch.object(api_auth, "DEMO_AUTH_ENABLED", True):
+            response = self.client.get(
+                "/api/patients",
+                headers={"Authorization": "Bearer demo-clinician-token"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, [{"patient_id": "demo-patient-001", "display_name": "Demo Patient"}])
+
 
 class ProfileEndpointTests(unittest.TestCase):
     def setUp(self):

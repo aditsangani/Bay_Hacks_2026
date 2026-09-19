@@ -11,55 +11,52 @@ FHIR-shaped observation designed around HIPAA principles.
 
 ---
 
-## Database & auth setup (Supabase)
+## Supabase and authentication setup
 
-This app uses [Supabase](https://supabase.com) for two things: persisting
-check-in history / the clinician audit log, and real login (Supabase Auth,
-email/password) for both patients and clinicians. **Login always requires a
-real Supabase project — there is no offline fallback for auth.** (Check-in
-storage alone has a fallback: without `database/.env`, `check_ins`/`audit_log`
-fall back to process-local memory, but you still can't log in without Supabase
-configured, so in practice you need both `.env` files below for the app to be
-usable at all.)
+The app supports two modes:
 
-**This repo already commits `database/.env`** with a shared project's
-credentials (a deliberate hackathon-only choice — see the note at the bottom
-of this section) — you likely don't need to redo steps 1–4 below unless you
-want your own project. **`frontend/.env` is NOT committed** (it's gitignored
-like normal), so every clone needs step 5 done locally, even if you're using
-the shared project from `database/.env`.
+- **Local demo mode:** runs immediately with built-in patient and clinician
+  demo identities. No Supabase browser key is required, and history falls back
+  to process memory when the backend database is also unconfigured.
+- **Supabase mode:** uses real authentication, profiles, durable check-in
+  history, and the clinician audit log. The backend and frontend use different
+  API keys; never put the backend service-role key in the frontend.
+
+Complete the steps below for real accounts and persistence. Skip to
+[Quick start](#quick-start-macos--zsh) for a local demo.
+
+**Note for this repo:** `database/.env` is committed with a shared project's
+credentials (a deliberate hackathon-only choice, see the warning below), but
+`frontend/.env` is gitignored, so every fresh clone still needs step 5.
 
 1. Create a project at [supabase.com](https://supabase.com) (or use an
    existing one).
 2. Open **SQL Editor → New query** in the Supabase dashboard, paste in
    the contents of [`database/schema.sql`](database/schema.sql), and
-   run it. This creates the `check_ins`, `audit_log`, and `profiles` tables.
-   Run the file again after pulling updates; its `add column if not exists`
-   statements safely add new fields to an existing `check_ins` table.
-3. In the dashboard, go to **Project Settings → API** and copy the
-   **Project URL** and the **`service_role` key** (not the `anon` key
-   — this backend needs to read/write freely without fighting
-   row-level-security policies, and the service_role key is only ever
-   used server-side, never sent to the frontend).
-4. From the project root:
-   ```powershell
-   cd database
-   copy .env.example .env      # macOS/Linux: cp .env.example .env
+   run it. This creates the `check_ins`, `audit_log`, and `profiles` tables. Run the
+   file again after pulling updates; its `add column if not exists` statements
+   safely add the camera-estimate fields to an existing `check_ins` table.
+   Until that migration is run, the backend remains compatible by storing
+   camera estimates inside the existing `wellness` JSON column.
+3. In **Project Settings → API**, copy the Project URL, the
+   **`service_role` key**, and the **anon/public key**.
+4. Configure the backend from the project root:
+
+   ```zsh
+   cp database/.env.example database/.env
    ```
-   Open `database/.env` and fill in `SUPABASE_URL` and `SUPABASE_KEY`
-   with the values from step 3.
-5. **Required even if you're using the shared `database/.env`:** the
-   frontend needs its own env file with the **anon/public** key (safe for
-   the browser, different from `service_role`) — find it on the same API
-   Keys page, under the "Legacy anon, service_role API keys" tab.
-   ```powershell
-   cd frontend
-   copy .env.example .env      # macOS/Linux: cp .env.example .env
+
+   Put the Project URL and `service_role` key in `database/.env` as
+   `SUPABASE_URL` and `SUPABASE_KEY`.
+5. Configure the frontend:
+
+   ```zsh
+   cp frontend/.env.example frontend/.env
    ```
-   Fill in `VITE_SUPABASE_URL` (same Project URL as step 3/4) and
-   `VITE_SUPABASE_ANON_KEY` (the anon key, not service_role). Restart
-   `npm run dev` after creating or editing this file — Vite only reads
-   `.env` at startup.
+
+   Put the same Project URL and the **anon/public key** in `frontend/.env` as
+   `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. `frontend/.env` is
+   gitignored; never commit real credentials.
 
 The backend (`backend/app.py`) automatically picks up `database/.env`
 via `database/db.py`, regardless of which directory you run `python
@@ -74,16 +71,15 @@ app.py` from.
 
 ## Quick start (macOS / zsh)
 
-For durable history, set up the [database](#database-setup-supabase) first.
-For a quick local demo, you can skip it. Open Terminal and run:
+Open Terminal and run:
 
 ```zsh
 cd /path/to/Bay_Hacks_2026
 cd backend
-rm -rf venv
-python3.11 -m venv venv
-source venv/bin/activate
+python3.12 -m venv venv-py312
+source venv-py312/bin/activate
 python -m pip install -r requirements.txt
+cp .env.example .env
 python app.py
 ```
 
@@ -115,9 +111,9 @@ directory (see [Troubleshooting](#troubleshooting) below).
 
 ### 1. Database (Supabase)
 
-Check-in history and the clinician audit log are persisted in Supabase when
-configured (see [Database setup](#database-setup-supabase)). Without it, the
-app uses temporary in-memory history for the current backend session.
+For local demo mode, copy `backend/.env.example` to `backend/.env`; this enables
+only the two fixed demo identities. For real accounts and durable history,
+complete [Supabase setup](#supabase-and-authentication-setup) instead.
 
 ### 2. Backend
 
@@ -126,6 +122,7 @@ cd backend
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+copy .env.example .env
 python app.py
 ```
 
@@ -180,12 +177,12 @@ If missing, install from nodejs.org.
 
 ## App views
 
-Use the **Check-In** and **Clinician** tabs in the top nav to switch
-views (these are real routes — `/` and `/dashboard` — not just a
-toggle). A sun/moon button next to the tabs switches between light and
-dark theme, saved in the browser. Navigating away from a check-in
-resets its progress and stops the camera; returning to the check-in
-view starts at the consent screen.
+In local demo mode, use the **Check-In** and **Clinician** tabs to switch
+between the fixed demo identities. With real authentication, patients see the
+Check-In route and clinicians see the Clinician Dashboard route; role-protected
+routes prevent one role from opening the other role's view. A sun/moon button
+switches themes. Navigating away from a check-in resets its progress and stops
+the camera.
 
 The check-in flow itself: consent → an adaptive sleep, symptoms, and mood
 questionnaire → camera measurement → voice prompts → result. The camera view
@@ -214,14 +211,37 @@ from the neurological signal risk score.
    that looks like `agent_xxxxxxxxxxxxxxxxxxxxxxxxx`.
 6. Open `frontend/src/CheckInFlow.jsx` and replace:
    ```js
-   const ELEVENLABS_AGENT_ID = 'REPLACE_WITH_YOUR_AGENT_ID'
+   const ELEVENLABS_AGENT_ID = 'agent_1201m2wz6ap4e3yrmdy4cfbgn5pm'
    ```
-   with your real agent ID. Save — Vite hot-reloads automatically.
+   with your agent ID if you are using a different agent. Save — Vite
+   hot-reloads automatically.
 
 If you see an orange warning on the voice step instead of the widget,
 the agent ID hasn't been set yet.
 
 ---
+
+## Deploying to Render
+
+[`render.yaml`](render.yaml) is a Blueprint that deploys the Flask API
+(`neurotriage-api`), the React frontend as a static site
+(`neurotriage-frontend`, which forwards `/api/*` to the API), and the
+Render Workflow demo.
+
+1. Render dashboard → **New → Blueprint** → select this repo.
+2. Enter the secrets it asks for: `SUPABASE_URL` and `SUPABASE_KEY`
+   (**service_role**) for the API; `VITE_SUPABASE_URL` and
+   `VITE_SUPABASE_ANON_KEY` (**anon**) for the frontend.
+3. After the first deploy, copy the API's real URL. If it isn't
+   `https://neurotriage-api.onrender.com`, edit the `/api/*` rewrite in
+   `render.yaml` and redeploy the frontend.
+4. In Supabase → Authentication → URL Configuration, set **Site URL** to the
+   frontend's Render URL so confirmation emails link back to it.
+
+The API runs one gunicorn worker on purpose (in-flight check-ins are held in
+process memory). MediaPipe is memory-hungry; if face capture crashes the API on
+the free tier, move it to a paid instance. Never set `ALLOW_DEMO_AUTH` in a
+deployed environment.
 
 ## Troubleshooting
 
@@ -270,18 +290,18 @@ protobuf noise, not errors. As long as you see `Running on
 http://127.0.0.1:5001` and no traceback, the server is fine.
 
 ### `RuntimeError: SUPABASE_URL and SUPABASE_KEY must be set`
-You skipped [Database & auth setup](#database--auth-setup-supabase), or
+You skipped [Supabase setup](#supabase-and-authentication-setup), or
 `database/.env` doesn't exist / isn't filled in yet. Copy
 `database/.env.example` to `database/.env` and fill in your Supabase
 project's URL and service_role key, then restart `python app.py`.
 
-### Sign up / log in does nothing, or the page is blank/broken
-`frontend/.env` is missing — it's gitignored and NOT included when you
-clone the repo, even though `database/.env` is. Copy
-`frontend/.env.example` to `frontend/.env`, fill in `VITE_SUPABASE_URL`
-and `VITE_SUPABASE_ANON_KEY` (see [Database & auth setup](#database--auth-setup-supabase)
-step 5), then restart `npm run dev` — Vite only reads `.env` at startup,
-so an existing `npm run dev` process won't pick up a newly created file.
+### The page says `Supabase setup required`
+This appears in a production build when `frontend/.env` is missing or still
+contains example values. Copy
+`frontend/.env.example` to `frontend/.env`, fill in the Project URL and
+**anon/public** key, then stop and restart `npm run dev`. Do not use the
+service-role key in this file. During `npm run dev`, missing frontend values
+activate local demo mode instead.
 
 ### `response_latency_ms` looks huge (100,000+)
 This field currently measures total conversation length (start of
@@ -302,8 +322,10 @@ demo.
   `backend/anomaly_scoring.py` produces FHIR-*shaped* JSON (correct
   field names/structure) but isn't validated against the FHIR spec or
   wired to a real EHR.
-- **Real auth** — the dashboard route takes a `clinician_id` query
-  param instead of a login system.
+- **Production account provisioning** — Supabase login and role-protected API
+  routes are implemented, but this hackathon flow lets a new user select the
+  patient or clinician role at signup. A production deployment must provision
+  clinician roles through an administrator or invitation workflow.
 - **Real immutable audit log** — `database/audit_log.py` now persists
   to a real Postgres table via Supabase (survives restarts), but
   nothing enforces true append-only/tamper-proof semantics — there's

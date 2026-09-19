@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 
 export default function NavBar() {
   const { theme, toggle } = useTheme()
-  const { session, role, displayName, signOut } = useAuth()
+  const { session, role, displayName, signOut, demoMode, switchDemoRole } = useAuth()
 
   const linkClass = ({ isActive }) =>
     `flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
@@ -29,14 +29,14 @@ export default function NavBar() {
         <div className="flex items-center gap-2">
           {session && (
             <nav className="flex items-center gap-1 rounded-full border border-black/10 bg-black/[0.02] p-1 dark:border-white/10 dark:bg-white/[0.03]">
-              {role === 'patient' && (
-                <NavLink to="/" end className={linkClass}>
+              {(role === 'patient' || demoMode) && (
+                <NavLink to="/" end className={linkClass} onClick={() => switchDemoRole('patient')}>
                   <User size={14} />
                   Check-In
                 </NavLink>
               )}
-              {role === 'clinician' && (
-                <NavLink to="/dashboard" className={linkClass}>
+              {(role === 'clinician' || demoMode) && (
+                <NavLink to="/dashboard" className={linkClass} onClick={() => switchDemoRole('clinician')}>
                   <Stethoscope size={14} />
                   Clinician
                 </NavLink>
@@ -48,14 +48,16 @@ export default function NavBar() {
               {displayName && (
                 <span className="hidden text-sm text-black/50 sm:inline dark:text-white/50">{displayName}</span>
               )}
-              <button
-                type="button"
-                onClick={signOut}
-                aria-label="Log out"
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-black/10 bg-black/[0.02] text-black/70 transition-colors hover:text-black dark:border-white/10 dark:bg-white/[0.03] dark:text-white/70 dark:hover:text-white"
-              >
-                <LogOut size={15} />
-              </button>
+              {!demoMode && (
+                <button
+                  type="button"
+                  onClick={signOut}
+                  aria-label="Log out"
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-black/10 bg-black/[0.02] text-black/70 transition-colors hover:text-black dark:border-white/10 dark:bg-white/[0.03] dark:text-white/70 dark:hover:text-white"
+                >
+                  <LogOut size={15} />
+                </button>
+              )}
             </>
           ) : (
             <NavLink to="/login" className={linkClass}>
