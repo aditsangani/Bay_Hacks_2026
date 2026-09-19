@@ -5,22 +5,29 @@ import {
   ShieldCheck,
   Camera,
   Mic,
+  ClipboardList,
   CheckCircle2,
   AlertTriangle,
   Loader2,
   ChevronRight,
 } from 'lucide-react'
 import { Card, Button, ProgressSteps, RiskBadge } from './components/ui.jsx'
+import WellnessQuestion from './components/WellnessQuestion.jsx'
 
 /**
  * Daily 60-second check-in flow.
  *
  * Steps:
  *  1. Consent screen (required before anything records — HIPAA-principles slide)
- *  2. Webcam capture -> POST /api/checkin/face (frame processed + discarded server-side)
- *  3. ElevenLabs Conversational AI widget -> spoken fluency prompts
- *  4. POST /api/checkin/voice with whatever latency/jitter data you capture
- *  5. POST /api/checkin/submit -> combined risk score + FHIR-shaped payload
+ *  2. Webcam capture -> live guidance via /api/checkin/face/preview (transient,
+ *     nothing persisted), then a 3-frame burst -> POST /api/checkin/face
+ *     (median-based facial asymmetry, only derived measurements cached)
+ *  3. ElevenLabs Conversational AI widget -> spoken fluency prompts, then
+ *     POST /api/checkin/voice with latency/jitter data
+ *  4. Adaptive wellness questionnaire -> POST /api/checkin/wellness/plan on
+ *     every answer to get pruned follow-up questions and completeness
+ *  5. POST /api/checkin/submit -> combined risk score + wellness + FHIR-shaped
+ *     payload
  *
  * SWAP BEFORE DEMO:
  *  - PATIENT_ID with real/mock patient selection UI if you have time
@@ -37,6 +44,7 @@ const STEPS = {
   CONSENT: 'consent',
   FACE: 'face',
   VOICE: 'voice',
+  WELLNESS: 'wellness',
   RESULT: 'result',
 }
 
@@ -44,6 +52,7 @@ const STEP_LIST = [
   { key: STEPS.CONSENT, label: 'Consent' },
   { key: STEPS.FACE, label: 'Face' },
   { key: STEPS.VOICE, label: 'Voice' },
+  { key: STEPS.WELLNESS, label: 'Wellness' },
   { key: STEPS.RESULT, label: 'Result' },
 ]
 
@@ -54,20 +63,38 @@ const fade = {
   transition: { duration: 0.25, ease: 'easeOut' },
 }
 
+async function postJSON(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(data.error || `Request to ${url} failed (${res.status})`)
+  }
+  return data
+}
+
 export default function CheckInFlow() {
   const [step, setStep] = useState(STEPS.CONSENT)
   const [consented, setConsented] = useState(false)
-  const [faceResult, setFaceResult] = useState(null)
   const [voiceStartTime, setVoiceStartTime] = useState(null)
   const [finalResult, setFinalResult] = useState(null)
   const [error, setError] = useState(null)
   const [capturing, setCapturing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [preview, setPreview] = useState(null) // { acceptable, message } from /face/preview
+
+  const [wellnessPlan, setWellnessPlan] = useState(null)
+  const [wellnessAnswers, setWellnessAnswers] = useState({})
+  const [wellnessLoading, setWellnessLoading] = useState(false)
 
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const mountedRef = useRef(true)
+  const previewInFlightRef = useRef(false)
 
   // --- Load ElevenLabs widget script once ---
   useEffect(() => {
@@ -110,37 +137,62 @@ export default function CheckInFlow() {
     }
   }, [stopCamera])
 
+  const captureFrameDataUrl = useCallback(() => {
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas || !video.videoWidth) return null
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    canvas.getContext('2d').drawImage(video, 0, 0)
+    return canvas.toDataURL('image/jpeg', 0.8)
+  }, [])
+
+  // --- Live positioning guidance while on the face step (transient, never persisted) ---
+  useEffect(() => {
+    if (step !== STEPS.FACE) {
+      setPreview(null)
+      return
+    }
+    const id = setInterval(async () => {
+      if (previewInFlightRef.current) return
+      const frame = captureFrameDataUrl()
+      if (!frame) return
+      previewInFlightRef.current = true
+      try {
+        const result = await postJSON('/api/checkin/face/preview', { image_b64: frame })
+        if (mountedRef.current) setPreview(result.quality)
+      } catch {
+        // transient preview hiccups aren't worth surfacing to the user
+      } finally {
+        previewInFlightRef.current = false
+      }
+    }, 700)
+    return () => clearInterval(id)
+  }, [step, captureFrameDataUrl])
+
   const handleConsent = async () => {
     setConsented(true)
     setStep(STEPS.FACE)
     await startCamera()
   }
 
-  const captureFrame = async () => {
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    if (!video || !canvas) return
+  const handleCapture = async () => {
     setCapturing(true)
-
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    const ctx = canvas.getContext('2d')
-    ctx.drawImage(video, 0, 0)
-    const imageB64 = canvas.toDataURL('image/jpeg', 0.8)
-
+    setError(null)
     try {
-      const res = await fetch('/api/checkin/face', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patient_id: PATIENT_ID, image_b64: imageB64 }),
-      })
-      const data = await res.json()
-      setFaceResult(data)
+      const frames = []
+      for (let i = 0; i < 3; i++) {
+        const frame = captureFrameDataUrl()
+        if (!frame) throw new Error('Camera not ready yet — wait a moment and try again.')
+        frames.push(frame)
+        if (i < 2) await new Promise((resolve) => setTimeout(resolve, 200))
+      }
+      await postJSON('/api/checkin/face', { patient_id: PATIENT_ID, images_b64: frames })
       stopCamera()
       setStep(STEPS.VOICE)
       setVoiceStartTime(Date.now())
     } catch (err) {
-      setError('Face check-in failed: ' + err.message)
+      setError(err.message)
     } finally {
       setCapturing(false)
     }
@@ -150,34 +202,63 @@ export default function CheckInFlow() {
   // to ElevenLabs' post-call webhook or client-side conversation events to
   // get actual response latency / audio for jitter analysis. For the demo,
   // this button simulates "conversation finished."
-  const finishVoiceStep = async () => {
-    const latencyMs = voiceStartTime ? Date.now() - voiceStartTime : null
+  const handleVoiceDone = async () => {
     setSubmitting(true)
-
+    setError(null)
     try {
-      await fetch('/api/checkin/voice', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          patient_id: PATIENT_ID,
-          response_latency_ms: latencyMs,
-          // voice_jitter is a stub here — either wire in a Parselmouth
-          // analysis step server-side on the recorded audio, or be
-          // upfront in the demo that this is simulated for now.
-          voice_jitter: 0.01 + Math.random() * 0.02,
-        }),
+      await postJSON('/api/checkin/voice', {
+        patient_id: PATIENT_ID,
+        response_latency_ms: voiceStartTime ? Date.now() - voiceStartTime : null,
+        // voice_jitter is a stub here — either wire in a Parselmouth
+        // analysis step server-side on the recorded audio, or be
+        // upfront in the demo that this is simulated for now.
+        voice_jitter: 0.01 + Math.random() * 0.02,
       })
+      setStep(STEPS.WELLNESS)
+    } catch (err) {
+      setError('Voice check-in failed: ' + err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
-      const res = await fetch('/api/checkin/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patient_id: PATIENT_ID }),
+  // --- Wellness questionnaire: every answer round-trips to /wellness/plan,
+  // which prunes stale follow-ups and returns the authoritative answer set. ---
+  const refreshWellnessPlan = async (nextAnswers) => {
+    setWellnessLoading(true)
+    setError(null)
+    try {
+      const plan = await postJSON('/api/checkin/wellness/plan', { answers: nextAnswers })
+      setWellnessPlan(plan)
+      setWellnessAnswers(plan.answers)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setWellnessLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (step === STEPS.WELLNESS) refreshWellnessPlan({})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step])
+
+  const handleWellnessAnswer = (questionId, value) => {
+    refreshWellnessPlan({ ...wellnessAnswers, [questionId]: value })
+  }
+
+  const handleFinishCheckin = async () => {
+    setSubmitting(true)
+    setError(null)
+    try {
+      const data = await postJSON('/api/checkin/submit', {
+        patient_id: PATIENT_ID,
+        wellness: wellnessAnswers,
       })
-      const data = await res.json()
       setFinalResult(data)
       setStep(STEPS.RESULT)
     } catch (err) {
-      setError('Voice check-in failed: ' + err.message)
+      setError(err.message)
     } finally {
       setSubmitting(false)
     }
@@ -260,20 +341,40 @@ export default function CheckInFlow() {
                   className="aspect-video w-full scale-x-[-1] object-cover"
                 />
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="h-40 w-40 rounded-full border-2 border-white/30" />
+                  <div
+                    className={`h-40 w-40 rounded-full border-2 transition-colors ${
+                      preview == null
+                        ? 'border-white/30'
+                        : preview.acceptable
+                        ? 'border-emerald-400/80'
+                        : 'border-amber-400/80'
+                    }`}
+                  />
                 </div>
               </div>
               <canvas ref={canvasRef} className="hidden" />
 
+              <p
+                className={`mt-3 text-center text-xs transition-colors ${
+                  preview == null
+                    ? 'text-black/40 dark:text-white/40'
+                    : preview.acceptable
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-amber-600 dark:text-amber-400'
+                }`}
+              >
+                {preview?.message ?? 'Positioning yourself…'}
+              </p>
+
               <Button
-                onClick={captureFrame}
+                onClick={handleCapture}
                 disabled={capturing}
                 className="mt-6 w-full"
               >
                 {capturing ? (
                   <>
                     <Loader2 size={16} className="animate-spin" />
-                    Analyzing frame…
+                    Capturing 3 frames…
                   </>
                 ) : (
                   <>Capture</>
@@ -310,17 +411,67 @@ export default function CheckInFlow() {
               )}
 
               <Button
-                onClick={finishVoiceStep}
+                onClick={handleVoiceDone}
                 disabled={submitting}
                 className="mt-6 w-full"
               >
                 {submitting ? (
                   <>
                     <Loader2 size={16} className="animate-spin" />
-                    Scoring check-in…
+                    Saving…
                   </>
                 ) : (
                   "I've finished the conversation"
+                )}
+              </Button>
+            </Card>
+          </motion.div>
+        )}
+
+        {step === STEPS.WELLNESS && (
+          <motion.div key="wellness" {...fade}>
+            <Card className="p-8">
+              <div className="mb-5 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/5 ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/15">
+                  <ClipboardList className="text-black dark:text-white" size={18} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold tracking-tight text-black dark:text-white">A few quick questions</h2>
+                  <p className="text-xs text-black/40 dark:text-white/40">Sleep, mood, and how you're feeling today.</p>
+                </div>
+              </div>
+
+              {wellnessPlan?.urgent ? (
+                <div className="flex items-start gap-2 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                  {wellnessPlan.summary}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {[...(wellnessPlan?.base_questions ?? []), ...(wellnessPlan?.questions ?? [])].map((q) => (
+                    <WellnessQuestion
+                      key={q.id}
+                      question={q}
+                      value={wellnessAnswers[q.id]}
+                      onChange={(value) => handleWellnessAnswer(q.id, value)}
+                      onSkip={() => handleWellnessAnswer(q.id, null)}
+                    />
+                  ))}
+                </div>
+              )}
+
+              <Button
+                onClick={handleFinishCheckin}
+                disabled={submitting || wellnessLoading || !wellnessPlan?.complete}
+                className="mt-6 w-full"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Finishing check-in…
+                  </>
+                ) : (
+                  'Finish check-in'
                 )}
               </Button>
             </Card>
@@ -353,6 +504,12 @@ export default function CheckInFlow() {
                       </span>
                     ))}
                   </div>
+                )}
+
+                {finalResult.wellness && (
+                  <p className="mt-4 max-w-sm text-xs text-black/50 dark:text-white/50">
+                    {finalResult.wellness.summary}
+                  </p>
                 )}
               </div>
 

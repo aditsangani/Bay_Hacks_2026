@@ -149,11 +149,18 @@ If missing, install from nodejs.org.
 
 ## App views
 
-Use the **Patient check-in** and **Clinician dashboard** buttons at the
-top of the app to switch views. The app starts in the patient view, and
-opening the clinician view reloads the latest check-in history. Switching
-away from a check-in resets its progress and stops the camera; returning
-to the patient view starts at the consent screen.
+Use the **Check-In** and **Clinician** tabs in the top nav to switch
+views (these are real routes — `/` and `/dashboard` — not just a
+toggle). A sun/moon button next to the tabs switches between light and
+dark theme, saved in the browser. Navigating away from a check-in
+resets its progress and stops the camera; returning to the check-in
+view starts at the consent screen.
+
+The check-in flow itself: consent → face capture (a live ring/message
+gives positioning feedback via `/api/checkin/face/preview` before you
+capture a 3-frame burst) → voice prompts → an adaptive wellness
+questionnaire (follow-up questions appear based on your answers, via
+`/api/checkin/wellness/plan`) → result.
 
 ---
 
