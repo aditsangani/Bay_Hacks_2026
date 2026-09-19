@@ -13,6 +13,13 @@ from datetime import datetime
 from db import get_client
 
 TABLE = "check_ins"
+EMBEDDED_VITALS_KEY = "_camera_vital_signs"
+_LOCAL_ROWS = {}
+
+
+def is_configured() -> bool:
+    from db import is_configured as database_is_configured
+    return database_is_configured()
 
 
 def append(
@@ -39,10 +46,23 @@ def append(
         "wellness": wellness,
         "vital_signs": vital_signs,
     }
-    get_client().table(TABLE).insert(row).execute()
+    if not is_configured():
+        _LOCAL_ROWS.setdefault(patient_id, []).append({**row, "created_at": datetime.utcnow().isoformat() + "+00:00"})
+        return
+    try:
+        get_client().table(TABLE).insert(row).execute()
+    except Exception as exc:
+        if vital_signs and "column check_ins.estimated_heart_rate_bpm does not exist" in str(exc):
+            row.pop("vital_signs", None)
+            row["wellness"] = {**(wellness or {}), EMBEDDED_VITALS_KEY: vital_signs}
+            get_client().table(TABLE).insert(row).execute()
+        else:
+            raise
 
 
 def history_for(patient_id: str):
+    if not is_configured():
+        return [_to_history_entry(row) for row in _LOCAL_ROWS.get(patient_id, [])]
     result = (
         get_client()
         .table(TABLE)
@@ -58,6 +78,9 @@ def latest_metrics_for(patient_id: str):
     """Most recent check-in's facial asymmetry score, used as the
     baseline comparison in compute_risk_score. None on a first-ever
     check-in."""
+    if not is_configured():
+        rows = _LOCAL_ROWS.get(patient_id, [])
+        return {"facial_asymmetry_score": rows[-1]["facial_asymmetry_score"]} if rows else None
     result = (
         get_client()
         .table(TABLE)
@@ -73,6 +96,10 @@ def latest_metrics_for(patient_id: str):
 
 
 def _to_history_entry(row: dict) -> dict:
+    wellness = row.get("wellness")
+    vital_signs = row.get("vital_signs") or (wellness or {}).get(EMBEDDED_VITALS_KEY)
+    if isinstance(wellness, dict):
+        wellness = {key: value for key, value in wellness.items() if key != EMBEDDED_VITALS_KEY}
     return {
         "metrics": {
             "facial_asymmetry_score": row["facial_asymmetry_score"],
@@ -94,8 +121,8 @@ def _to_history_entry(row: dict) -> dict:
             "method": row.get("face_method"),
             "sample_count": row.get("face_sample_count"),
         },
-        "wellness": row.get("wellness"),
-        "vital_signs": row.get("vital_signs"),
+        "wellness": wellness,
+        "vital_signs": vital_signs,
         "timestamp": _to_epoch(row["created_at"]),
     }
 

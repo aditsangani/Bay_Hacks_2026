@@ -16,6 +16,12 @@ from datetime import datetime
 from db import get_client
 
 TABLE = "audit_log"
+_LOCAL_ENTRIES = []
+
+
+def is_configured() -> bool:
+    from db import is_configured as database_is_configured
+    return database_is_configured()
 
 
 class SupabaseAuditLog:
@@ -25,9 +31,14 @@ class SupabaseAuditLog:
             "action": action,
             "target_patient_hash": target_patient_hash,
         }
+        if not is_configured():
+            _LOCAL_ENTRIES.append({**row, "timestamp": datetime.utcnow().timestamp()})
+            return
         get_client().table(TABLE).insert(row).execute()
 
     def all_entries(self):
+        if not is_configured():
+            return list(_LOCAL_ENTRIES)
         result = (
             get_client()
             .table(TABLE)

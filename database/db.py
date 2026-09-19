@@ -24,6 +24,10 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 _client: Client | None = None
 
 
+def is_configured() -> bool:
+    return bool(SUPABASE_URL and SUPABASE_KEY)
+
+
 def get_client() -> Client:
     global _client
     if _client is None:
