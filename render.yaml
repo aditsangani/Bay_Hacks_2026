@@ -1,25 +1,61 @@
-# Render Blueprint — deploys the NeuroTriage-Home check-in pipeline as
-# a Render Workflow (required for the "Best Use of Render" track).
+# Render Blueprint for NeuroTriage-Home.
 #
-# This deploys ALONGSIDE your existing Flask app, not instead of it.
-# Your frontend keeps talking to Flask on localhost:5001 as normal;
-# this Workflow service exists specifically so you have a real,
-# triggerable Render Workflow run to show in the dashboard for judges.
+# Deploys three services from one repo:
+#   1. neurotriage-api       Flask backend (web service, gunicorn)
+#   2. neurotriage-frontend  React/Vite build (static site) that forwards
+#                            /api/* to the API via a rewrite rule, so the
+#                            frontend's relative fetch('/api/...') calls
+#                            work unchanged and there are no CORS issues
+#   3. neurotriage-workflow  Render Workflow demo ("Best Use of Render" track)
 #
 # Setup:
-#   1. Push this file (at the repo root) and backend/workflow.py to GitHub.
-#   2. In the Render dashboard: New -> Blueprint -> select this repo.
-#   3. Render should detect this file automatically. If it asks you to
-#      pick a service type manually instead, choose "Workflow".
-#   4. Once deployed, trigger a run of `run_checkin_pipeline` from the
-#      dashboard with sample patient_id / image_b64 / voice_metrics
-#      values to show a live run for your demo.
+#   1. Push this file to GitHub.
+#   2. Render dashboard: New -> Blueprint -> select this repo.
+#   3. Fill in the secrets marked `sync: false` when prompted (see below).
+#   4. After first deploy, check the API's real URL in the dashboard. If it
+#      is not https://neurotriage-api.onrender.com (name already taken),
+#      update the /api/* rewrite destination below and redeploy the frontend.
+#   5. In Supabase: Authentication -> URL Configuration -> set Site URL to
+#      the frontend's Render URL, so email-confirmation links land there.
 #
-# Confirm this file's exact schema (keys, allowed values) against
-# Render's current docs before deploying — Workflows is a newer
-# product and the blueprint format may have changed.
+# Confirm key names against Render's current Blueprint docs before deploying.
 
 services:
+  - type: web
+    name: neurotriage-api
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    # One worker on purpose: PENDING_CHECKINS in app.py is an in-process
+    # dict, so face -> voice -> submit must all hit the same process.
+    startCommand: cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY   # service_role key (server-only, never the anon key)
+        sync: false
+
+  - type: web
+    name: neurotriage-frontend
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      # Inlined into the browser bundle at build time (anon key is safe to expose).
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://neurotriage-api.onrender.com/api/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
   - type: workflow
     name: neurotriage-workflow
     runtime: python
