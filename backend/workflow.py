@@ -122,4 +122,4 @@ if __name__ == "__main__":
     # file directly. Check `render workflows dev` or similar in the
     # current CLI docs — the exact local-run command may differ from
     # what's here.
-    app.run()
+    app.start()
