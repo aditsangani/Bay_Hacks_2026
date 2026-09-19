@@ -1,5 +1,6 @@
 """
-Patient check-in history, persisted in Supabase (table: check_ins).
+Patient check-in history, persisted in Supabase (table: check_ins) when
+configured, with a process-local fallback for zero-config development.
 
 Replaces the old in-memory PATIENT_HISTORY dict in app.py — history now
 survives server restarts. Still demo-scale: no auth beyond the backend
@@ -8,18 +9,43 @@ client (the raw ID never leaves this layer — see anomaly_scoring.py's
 _hash_patient_id for what actually goes out in telemetry payloads).
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
+from threading import Lock
 
-from db import get_client
+from db import get_client, is_configured
 
 TABLE = "check_ins"
 EMBEDDED_VITALS_KEY = "_camera_vital_signs"
 _LOCAL_ROWS = {}
+_LOCAL_LOCK = Lock()
+_OPTIONAL_COLUMNS = {
+    "triage_tier",
+    "triage_label",
+    "triage_action",
+    "triage_reason",
+    "vital_signs",
+}
 
 
-def is_configured() -> bool:
-    from db import is_configured as database_is_configured
-    return database_is_configured()
+def _missing_optional_column(exc: Exception) -> str | None:
+    message = str(exc).lower()
+    if "does not exist" not in message and "schema cache" not in message:
+        return None
+    for column in _OPTIONAL_COLUMNS:
+        if column in message:
+            return column
+    # Compatibility with the short-lived per-column camera schema.
+    if "estimated_heart_rate_bpm" in message or "estimated_breathing_rate_bpm" in message:
+        return "vital_signs"
+    return None
+
+
+def _embed_vital_signs(wellness: dict | None, vital_signs: dict | None) -> dict | None:
+    if not vital_signs:
+        return wellness
+    payload = dict(wellness or {})
+    payload[EMBEDDED_VITALS_KEY] = dict(vital_signs)
+    return payload
 
 
 def append(
@@ -41,28 +67,41 @@ def append(
         "triage_tier": risk.get("triage", {}).get("tier"),
         "triage_label": risk.get("triage", {}).get("label"),
         "triage_action": risk.get("triage", {}).get("action"),
+        "triage_reason": risk.get("triage", {}).get("reason"),
         "face_method": (face_analysis or {}).get("method"),
         "face_sample_count": (face_analysis or {}).get("sample_count"),
         "wellness": wellness,
         "vital_signs": vital_signs,
     }
     if not is_configured():
-        _LOCAL_ROWS.setdefault(patient_id, []).append({**row, "created_at": datetime.utcnow().isoformat() + "+00:00"})
+        row["created_at"] = datetime.now(timezone.utc).isoformat()
+        with _LOCAL_LOCK:
+            _LOCAL_ROWS.setdefault(patient_id, []).append(row)
         return
-    try:
-        get_client().table(TABLE).insert(row).execute()
-    except Exception as exc:
-        if vital_signs and "column check_ins.estimated_heart_rate_bpm does not exist" in str(exc):
-            row.pop("vital_signs", None)
-            row["wellness"] = {**(wellness or {}), EMBEDDED_VITALS_KEY: vital_signs}
-            get_client().table(TABLE).insert(row).execute()
-        else:
-            raise
+
+    # Older team databases may not have every newly introduced optional
+    # column yet. Retry only for an explicitly reported missing optional
+    # column; authentication, network, and other database errors still fail.
+    candidate = dict(row)
+    for _ in range(len(_OPTIONAL_COLUMNS) + 1):
+        try:
+            get_client().table(TABLE).insert(candidate).execute()
+            return
+        except Exception as exc:
+            missing = _missing_optional_column(exc)
+            if not missing or missing not in candidate:
+                raise
+            if missing == "vital_signs":
+                candidate["wellness"] = _embed_vital_signs(wellness, vital_signs)
+            candidate.pop(missing)
+    raise RuntimeError("Could not find a compatible check_ins schema")
 
 
 def history_for(patient_id: str):
     if not is_configured():
-        return [_to_history_entry(row) for row in _LOCAL_ROWS.get(patient_id, [])]
+        with _LOCAL_LOCK:
+            rows = [dict(row) for row in _LOCAL_ROWS.get(patient_id, [])]
+        return [_to_history_entry(row) for row in rows]
     result = (
         get_client()
         .table(TABLE)
@@ -79,7 +118,8 @@ def latest_metrics_for(patient_id: str):
     baseline comparison in compute_risk_score. None on a first-ever
     check-in."""
     if not is_configured():
-        rows = _LOCAL_ROWS.get(patient_id, [])
+        with _LOCAL_LOCK:
+            rows = list(_LOCAL_ROWS.get(patient_id, []))
         return {"facial_asymmetry_score": rows[-1]["facial_asymmetry_score"]} if rows else None
     result = (
         get_client()
@@ -97,9 +137,9 @@ def latest_metrics_for(patient_id: str):
 
 def _to_history_entry(row: dict) -> dict:
     wellness = row.get("wellness")
-    vital_signs = row.get("vital_signs") or (wellness or {}).get(EMBEDDED_VITALS_KEY)
+    vital_signs = row.get("vital_signs") or ((wellness or {}).get(EMBEDDED_VITALS_KEY) if isinstance(wellness, dict) else None)
     if isinstance(wellness, dict):
-        wellness = {key: value for key, value in wellness.items() if key != EMBEDDED_VITALS_KEY}
+        wellness = {key: value for key, value in wellness.items() if key != EMBEDDED_VITALS_KEY} or None
     return {
         "metrics": {
             "facial_asymmetry_score": row["facial_asymmetry_score"],
@@ -115,6 +155,7 @@ def _to_history_entry(row: dict) -> dict:
                 "label": row.get("triage_label") or "Stable",
                 "color": {1: "green", 2: "amber", 3: "red"}.get(row.get("triage_tier") or 1, "green"),
                 "action": row.get("triage_action") or "Schedule standard next morning check-in.",
+                "reason": row.get("triage_reason") or "Metrics are within normal variance for routine monitoring.",
             },
         },
         "face_analysis": {

@@ -309,7 +309,6 @@ export default function ClinicianDashboard() {
                             <>
                               <span className="block">{h.vital_signs.heart_rate_bpm} BPM</span>
                               <span className="block">{h.vital_signs.breathing_rate_bpm} breaths/min</span>
-                              <span className="mt-1 block text-xs capitalize text-black/40 dark:text-white/40">{h.vital_signs.confidence} confidence</span>
                             </>
                           ) : <span className="text-black/40 dark:text-white/40">Not collected</span>}
                         </td>

@@ -25,6 +25,7 @@ _client: Client | None = None
 
 
 def is_configured() -> bool:
+    """Whether durable Supabase persistence is configured for this process."""
     return bool(SUPABASE_URL and SUPABASE_KEY)
 
 

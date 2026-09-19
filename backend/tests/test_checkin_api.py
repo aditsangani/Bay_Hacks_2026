@@ -248,8 +248,9 @@ class LocalPersistenceTests(unittest.TestCase):
                 return self
 
             def execute(self):
-                if len(self.rows) == 1:
-                    raise RuntimeError("column check_ins.estimated_heart_rate_bpm does not exist")
+                for column in ("triage_tier", "triage_label", "triage_action", "triage_reason", "vital_signs"):
+                    if column in self.pending:
+                        raise RuntimeError(f"column check_ins.{column} does not exist")
                 return None
 
         table = FakeInsertTable()
@@ -265,10 +266,11 @@ class LocalPersistenceTests(unittest.TestCase):
                 vital_signs=VITALS,
             )
 
-        self.assertEqual(len(table.rows), 2)
-        self.assertNotIn("estimated_heart_rate_bpm", table.rows[1])
-        self.assertEqual(table.rows[1]["wellness"][api.patient_history.EMBEDDED_VITALS_KEY]["heart_rate_bpm"], 72)
-        stored = {**table.rows[1], "created_at": "2026-09-19T12:00:00+00:00"}
+        stored_row = table.rows[-1]
+        self.assertEqual(len(table.rows), 6)
+        self.assertNotIn("vital_signs", stored_row)
+        self.assertEqual(stored_row["wellness"][api.patient_history.EMBEDDED_VITALS_KEY]["heart_rate_bpm"], 72)
+        stored = {**stored_row, "created_at": "2026-09-19T12:00:00+00:00"}
         restored = api.patient_history._to_history_entry(stored)
         self.assertEqual(restored["vital_signs"]["breathing_rate_bpm"], 15)
         self.assertNotIn(api.patient_history.EMBEDDED_VITALS_KEY, restored["wellness"])

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { AlertTriangle, CheckCircle2, ChevronRight, Loader2, Mic, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronRight, HeartPulse, Loader2, Mic, RefreshCw, ShieldCheck, Wind } from 'lucide-react'
 import { Button, Card, ProgressSteps, RiskBadge } from './components/ui.jsx'
 import FaceCheckIn from './components/FaceCheckIn.jsx'
 import WellnessCheckIn from './components/WellnessCheckIn.jsx'
@@ -14,6 +14,7 @@ const STEPS = {
   CONSENT: 'consent',
   WELLNESS: 'wellness',
   FACE: 'face',
+  CAMERA_RESULT: 'camera-result',
   VOICE: 'voice',
   RESULT: 'result',
 }
@@ -22,6 +23,7 @@ const STEP_LIST = [
   { key: STEPS.CONSENT, label: 'Consent' },
   { key: STEPS.WELLNESS, label: 'Wellbeing' },
   { key: STEPS.FACE, label: 'Camera' },
+  { key: STEPS.CAMERA_RESULT, label: 'Review' },
   { key: STEPS.VOICE, label: 'Voice' },
   { key: STEPS.RESULT, label: 'Result' },
 ]
@@ -33,8 +35,14 @@ const fade = {
   transition: { duration: 0.25, ease: 'easeOut' },
 }
 
-async function readJson(response) {
-  return response.json().catch(() => ({}))
+async function readResponse(response) {
+  const text = await response.text()
+  if (!text) return {}
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { error: response.ok ? 'The server returned an unreadable response.' : `The backend returned ${response.status} ${response.statusText}. Check the backend terminal for details.` }
+  }
 }
 
 export default function CheckInFlow() {
@@ -80,8 +88,19 @@ export default function CheckInFlow() {
   function handleCameraComplete(result) {
     setCameraResult(result)
     setError(null)
+    setStep(STEPS.CAMERA_RESULT)
+  }
+
+  function continueToVoice() {
+    setError(null)
     setVoiceStartTime(Date.now())
     setStep(STEPS.VOICE)
+  }
+
+  function retakeCameraMeasurement() {
+    setCameraResult(null)
+    setError(null)
+    setStep(STEPS.FACE)
   }
 
   async function finishVoiceStep() {
@@ -103,7 +122,7 @@ export default function CheckInFlow() {
           voice_jitter: 0.01 + Math.random() * 0.02,
         }),
       })
-      const voiceData = await readJson(voiceResponse)
+      const voiceData = await readResponse(voiceResponse)
       if (!voiceResponse.ok) throw new Error(voiceData.error || 'Could not save the voice step.')
 
       const response = await fetch('/api/checkin/submit', {
@@ -112,7 +131,7 @@ export default function CheckInFlow() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ patient_id: PATIENT_ID, wellness: wellnessAnswers }),
       })
-      const result = await readJson(response)
+      const result = await readResponse(response)
       if (!response.ok) throw new Error(result.error || 'Could not finish the check-in.')
       if (!mountedRef.current) return
       setFinalResult(result)
@@ -177,6 +196,48 @@ export default function CheckInFlow() {
           <motion.div key="face" {...fade}><FaceCheckIn patientId={PATIENT_ID} onComplete={handleCameraComplete} /></motion.div>
         )}
 
+        {step === STEPS.CAMERA_RESULT && cameraResult?.vital_signs && (
+          <motion.div key="camera-result" {...fade}>
+            <Card className="p-8">
+              <div className="flex flex-col items-center text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/20 dark:text-emerald-300">
+                  <CheckCircle2 size={26} />
+                </div>
+                <h2 className="mt-4 text-xl font-semibold tracking-tight text-black dark:text-white">Camera measurement complete</h2>
+                <p className="mt-2 text-sm text-black/50 dark:text-white/50">Review your estimates for as long as you need, then continue.</p>
+              </div>
+
+              <section aria-label="Camera wellness estimates" className="mt-7 grid grid-cols-2 gap-3">
+                <div className="rounded-2xl border border-rose-500/20 bg-rose-500/[0.06] p-5 text-center">
+                  <HeartPulse className="mx-auto text-rose-500" size={22} />
+                  <p className="mt-2 text-xs text-black/45 dark:text-white/45">Estimated pulse</p>
+                  <p className="tabular mt-1 text-3xl font-semibold text-black dark:text-white">{cameraResult.vital_signs.heart_rate_bpm}</p>
+                  <p className="text-xs text-black/45 dark:text-white/45">beats per minute</p>
+                </div>
+                <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.06] p-5 text-center">
+                  <Wind className="mx-auto text-cyan-500" size={22} />
+                  <p className="mt-2 text-xs text-black/45 dark:text-white/45">Estimated breathing</p>
+                  <p className="tabular mt-1 text-3xl font-semibold text-black dark:text-white">{cameraResult.vital_signs.breathing_rate_bpm}</p>
+                  <p className="text-xs text-black/45 dark:text-white/45">breaths per minute</p>
+                </div>
+              </section>
+
+              <div className="mt-4 rounded-2xl border border-black/10 bg-black/[0.02] p-4 text-sm dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-black/50 dark:text-white/50">Facial symmetry score</span>
+                  <span className="tabular font-semibold text-black dark:text-white">{cameraResult.asymmetry_score?.toFixed(3) ?? '—'}</span>
+                </div>
+                <p className="mt-3 text-xs leading-relaxed text-black/45 dark:text-white/45">
+                  These are experimental camera estimates, not medical measurements. If either value looks implausible, retake it in bright, steady light.
+                </p>
+              </div>
+
+              <Button type="button" onClick={continueToVoice} className="mt-6 w-full">Continue to voice check <ChevronRight size={16} /></Button>
+              <Button type="button" variant="ghost" onClick={retakeCameraMeasurement} className="mt-3 w-full"><RefreshCw size={15} />Retake camera measurement</Button>
+            </Card>
+          </motion.div>
+        )}
+
         {step === STEPS.VOICE && (
           <motion.div key="voice" {...fade}>
             <Card className="p-8">
@@ -223,7 +284,6 @@ export default function CheckInFlow() {
                     <p className="text-xs text-black/45 dark:text-white/45">Estimated breathing</p>
                     <p className="tabular mt-1 text-2xl font-semibold text-black dark:text-white">{cameraResult.vital_signs.breathing_rate_bpm} <span className="text-sm font-normal">/ min</span></p>
                   </div>
-                  <p className="col-span-2 text-center text-xs text-black/45 dark:text-white/45">Camera estimate confidence: {cameraResult.vital_signs.confidence}</p>
                 </section>
               )}
 

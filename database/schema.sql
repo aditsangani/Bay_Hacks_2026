@@ -12,6 +12,7 @@ create table if not exists check_ins (
   triage_tier smallint default 1,
   triage_label text default 'Stable',
   triage_action text,
+  triage_reason text,
   face_method text,
   face_sample_count integer,
   wellness jsonb,
@@ -24,6 +25,7 @@ alter table check_ins add column if not exists vital_signs jsonb;
 alter table check_ins add column if not exists triage_tier smallint default 1;
 alter table check_ins add column if not exists triage_label text default 'Stable';
 alter table check_ins add column if not exists triage_action text;
+alter table check_ins add column if not exists triage_reason text;
 
 create index if not exists check_ins_patient_id_idx on check_ins (patient_id, created_at);
 
