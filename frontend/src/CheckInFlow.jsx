@@ -19,7 +19,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react'
  *  this is written against their standard <elevenlabs-convai> embed pattern.)
  */
 
-const ELEVENLABS_AGENT_ID = 'REPLACE_WITH_YOUR_AGENT_ID'
+const ELEVENLABS_AGENT_ID = 'agent_1201m2wz6ap4e3yrmdy4cfbgn5pm'
 const PATIENT_ID = 'demo-patient-001' // swap for real patient selection if you build it
 
 const STEPS = {
