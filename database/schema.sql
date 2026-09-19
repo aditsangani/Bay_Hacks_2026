@@ -37,11 +37,11 @@ create table if not exists audit_log (
   created_at timestamptz not null default now()
 );
 
--- NOTE: check_ins and audit_log intentionally do NOT have RLS enabled.
--- The Flask backend is the only writer/reader of these tables and always
--- uses the Supabase service_role key (see database/db.py), which bypasses
--- RLS entirely -- so RLS policies here would be theater, not protection.
--- Authorization for these tables is enforced in Flask (see backend/auth.py).
+-- Deny direct browser access to clinical and audit data. The Flask backend is
+-- the only reader/writer and uses the service_role key, which bypasses RLS
+-- after enforcing patient/clinician authorization in backend/auth.py.
+alter table check_ins enable row level security;
+alter table audit_log enable row level security;
 
 -- Profiles: one row per Supabase Auth user, created at signup time via
 -- POST /api/profile (see backend/app.py) rather than a direct client
@@ -58,21 +58,21 @@ create index if not exists profiles_role_idx on profiles (role);
 
 alter table profiles enable row level security;
 
--- Any authenticated user may read all profiles. The clinician-only
--- GET /api/patients endpoint itself is protected by Flask (not this
--- policy) since it uses the service_role key; this policy exists for
--- the frontend's own direct profile lookups (AuthContext fetching the
--- logged-in user's own role/name) and as a sane default for this table.
-create policy "profiles_select_authenticated"
+-- The frontend needs only the logged-in user's own profile. Clinicians obtain
+-- the patient list through the role-protected Flask endpoint, not directly.
+drop policy if exists "profiles_select_authenticated" on profiles;
+drop policy if exists "profiles_select_own" on profiles;
+create policy "profiles_select_own"
   on profiles for select
   to authenticated
-  using (true);
+  using (auth.uid() = id);
 
 -- Defense-in-depth: a logged-in user may insert only their own row.
 -- The normal signup path (POST /api/profile) uses the service_role key
 -- and bypasses this entirely. This policy just stops a logged-in user
 -- from ever inserting/overwriting someone else's row via a direct
 -- Supabase REST call.
+drop policy if exists "profiles_insert_own" on profiles;
 create policy "profiles_insert_own"
   on profiles for insert
   to authenticated

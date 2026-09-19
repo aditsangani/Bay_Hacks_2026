@@ -3,10 +3,10 @@ Patient check-in history, persisted in Supabase (table: check_ins) when
 configured, with a process-local fallback for zero-config development.
 
 Replaces the old in-memory PATIENT_HISTORY dict in app.py — history now
-survives server restarts. Still demo-scale: no auth beyond the backend
-holding the service_role key, and patient_id is stored as given by the
-client (the raw ID never leaves this layer — see anomaly_scoring.py's
-_hash_patient_id for what actually goes out in telemetry payloads).
+survives server restarts. Authenticated routes derive patient_id from the
+verified Supabase user rather than trusting request data. The raw ID never
+leaves this persistence layer in telemetry; see anomaly_scoring.py's
+_hash_patient_id for the de-identified value sent downstream.
 """
 
 from datetime import datetime, timezone

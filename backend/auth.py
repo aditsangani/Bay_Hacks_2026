@@ -10,10 +10,22 @@ acceptable trade at hackathon scale; swap to local JWT verification
 first if this ever needs to scale.
 """
 
+import os
 from functools import wraps
+from pathlib import Path
+
+from dotenv import load_dotenv
 from flask import request, jsonify, g
 
 from db import get_client
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
+DEMO_AUTH_ENABLED = os.environ.get("ALLOW_DEMO_AUTH", "").lower() in {"1", "true", "yes"}
+DEMO_IDENTITIES = {
+    "demo-patient-token": ("demo-patient-001", "patient", "Demo Patient"),
+    "demo-clinician-token": ("demo-clinician-001", "clinician", "Demo Clinician"),
+}
 
 
 def _extract_bearer_token():
@@ -37,6 +49,10 @@ def require_auth(fn):
         token = _extract_bearer_token()
         if not token:
             return jsonify({"error": "Missing or malformed Authorization header"}), 401
+        if DEMO_AUTH_ENABLED and token in DEMO_IDENTITIES:
+            g.user_id, g.role, g.display_name = DEMO_IDENTITIES[token]
+            g.demo_mode = True
+            return fn(*args, **kwargs)
         try:
             auth_response = get_client().auth.get_user(token)
         except Exception:
@@ -59,6 +75,7 @@ def require_auth(fn):
         g.user_id = user.id
         g.role = profile.data[0]["role"]
         g.display_name = profile.data[0]["display_name"]
+        g.demo_mode = False
         return fn(*args, **kwargs)
     return wrapper
 

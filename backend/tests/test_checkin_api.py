@@ -195,6 +195,16 @@ class CheckInApiTests(unittest.TestCase):
         self.assertIn("test-patient", api.PENDING_CHECKINS)
         self.assertNotIn("someone-else", api.PENDING_CHECKINS)
 
+    def test_local_demo_patient_token_requires_explicit_flag(self):
+        headers = {"Authorization": "Bearer demo-patient-token"}
+        with patch.object(api_auth, "DEMO_AUTH_ENABLED", False):
+            rejected = self.client.post("/api/checkin/wellness/plan", json={"answers": ANSWERS}, headers=headers)
+        self.assertEqual(rejected.status_code, 401)
+
+        with patch.object(api_auth, "DEMO_AUTH_ENABLED", True):
+            accepted = self.client.post("/api/checkin/wellness/plan", json={"answers": ANSWERS}, headers=headers)
+        self.assertEqual(accepted.status_code, 200)
+
     # --- Existing behavior, now authenticated ---
 
     def test_preview_never_creates_pending_or_history(self):

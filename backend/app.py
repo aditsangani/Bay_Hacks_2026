@@ -28,8 +28,9 @@ NOTE ON PRIVACY / HIPAA-principles boundary:
     HASHED version ever leaves via telemetry payloads / FHIR
     observations (see anomaly_scoring.py's _hash_patient_id) — images
     and landmark coordinates never enter patient history at all.
-  - SUPABASE_URL and SUPABASE_KEY enable durable storage. Without them,
-    local development uses process-memory history that clears on restart.
+  - SUPABASE_URL and SUPABASE_KEY are required by the authenticated app.
+    The history modules retain an in-memory fallback for isolated tests, but
+    normal API requests verify users against Supabase Auth first.
     See ../database/.env.example and ../database/db.py.
 """
 
@@ -292,6 +293,8 @@ def get_audit_log():
 @require_role("clinician")
 def list_patients():
     """Backs the clinician dashboard's patient picker."""
+    if getattr(g, "demo_mode", False):
+        return jsonify([{"patient_id": "demo-patient-001", "display_name": "Demo Patient"}])
     result = (
         get_client()
         .table("profiles")
@@ -349,4 +352,10 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    debug_enabled = os.environ.get("FLASK_DEBUG", "").lower() in {"1", "true", "yes"}
+    app.run(
+        host=os.environ.get("FLASK_HOST", "127.0.0.1"),
+        port=int(os.environ.get("PORT", "5001")),
+        debug=debug_enabled,
+        use_reloader=debug_enabled,
+    )
